@@ -492,3 +492,66 @@ class AIEngine:
             f"{lines_str}\n\n"
             f"返回纯JSON：{{\"title\":\"标题\"}}"
         )
+
+    # ═══ AI 一键创建剧本 ═══
+
+    def build_profile_generation_prompt(self, description: str) -> str:
+        """构建「一键创建剧本」prompt：从描述生成世界/场景/角色。"""
+        return (
+            "你是一个 RPG 剧本设计师。根据用户的描述，设计一个 ChatRoom 角色扮演剧本。\n\n"
+            f"用户描述：{description}\n\n"
+            "要求：\n"
+            "1. 生成 3-5 个有性格差异的角色（含名字、英文名、性格、外貌描述、system_prompt）\n"
+            "2. 生成 3-6 个场景（时间、地点、场景描述、氛围）\n"
+            "3. 给出世界观设定（1-2 句）\n"
+            "4. system_prompt 要详细定义角色人设、语气、表达方式，对话用「」包裹，动作用*星号*\n\n"
+            "返回纯 JSON，结构如下：\n"
+            '{"title":"剧本标题","world":"世界观","scenes":['
+            '{"time":"清晨","location":"地点","scene":"描述","mood":"氛围"}],'
+            '"characters":[{"name":"Yuki","display_name":"小雪","color":"#7ec8e3",'
+            '"description":"描述","personality":"性格","system_prompt":"详细人设"}],'
+            '"turn_order":["Yuki","Rui"]}\n'
+            "只返回 JSON，不要其他文字。"
+        )
+
+    def generate_profile_async(self, description: str, on_result, on_error=None):
+        """异步生成完整剧本。on_result(parsed_dict) / on_error(msg)。
+
+        parsed_dict: {title, world, scenes:[...], characters:[...], turn_order:[...]}
+        """
+        from services.api_service import call_chat_completion_async
+        if not config.API_KEY:
+            if on_error:
+                on_error("未配置 API Key")
+            return
+
+        prompt = self.build_profile_generation_prompt(description)
+
+        def _on_text(content):
+            try:
+                data, err = extract_json(content)
+                if not data:
+                    if on_error:
+                        on_error(f"解析失败: {err}")
+                    return
+                # 基本校验
+                if not data.get("characters") or not data.get("scenes"):
+                    if on_error:
+                        on_error("返回数据缺少角色或场景")
+                    return
+                on_result(data)
+            except Exception as ex:
+                if on_error:
+                    on_error(str(ex))
+
+        call_chat_completion_async(
+            messages=[
+                {"role": "system", "content": "你是一个剧本设计师，只返回JSON。"},
+                {"role": "user", "content": prompt},
+            ],
+            on_result=_on_text,
+            on_error=on_error,
+            temperature=0.9,
+            max_tokens=2500,
+            timeout=60.0,
+        )
