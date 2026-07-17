@@ -20,12 +20,12 @@ __all__ = ["ProfileCard", "gather_profile_meta"]
 def gather_profile_meta(folder_name: str) -> dict:
     """读取剧本元信息：display / characters / scenes / chats / world / emoji。"""
     pdir = config.PROFILES_DIR / folder_name
-    pc = load_json(pdir / "config.json") or {}
+    pc = load_json(pdir / "config.json", default={})
     app = pc.get("app", {})
     title = app.get("title", folder_name)
     world = pc.get("world", {}).get("setting", "")
     order = pc.get("turn", {}).get("order", [])
-    scenes = load_json(pdir / "scenes.json") or []
+    scenes = load_json(pdir / "scenes.json", default=[])
     char_dir = pdir / "characters"
     char_count = len(list(char_dir.glob("*.json"))) if char_dir.exists() else 0
     chats_dir = pdir / "chats"

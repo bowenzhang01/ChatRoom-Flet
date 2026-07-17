@@ -69,6 +69,8 @@ class DialogueLoop:
     def start(self):
         """启动对话。若 scene_idx == -1（按时间生成），由 UI 层先调
         ai.generate_time_scene_sync() 并确认后再调此方法。"""
+        from core.debug import invariant, validate_runtime_state
+        invariant(not self.running, "start() 调用时 loop 已在运行中")
         if self._thread is not None:
             if self._thread.is_alive():
                 print("[loop] start: thread already alive, ignoring")
@@ -98,7 +100,7 @@ class DialogueLoop:
         self.app._npc_silent_turns = 0
         self.app._npc_rounds_left = 0
         self.app._char_turns_since_event = 0
-        self.app._api_error_count = 0
+        self.ai._api_error_count = 0
 
         self._stop_event.clear()
         self._paused.set()
@@ -106,10 +108,15 @@ class DialogueLoop:
         self._thread.start()
         self.bus.emit("started", None)
         self.bus.emit("set_status", "运行中")
+        validate_runtime_state(self.app)
 
     def pause(self):
         """暂停对话（线程保持存活，空转等待）。"""
+        from core.debug import invariant
+        invariant(self.running, f"pause() 调用时 loop 未运行 (running={self.running})")
         if not self.running:
+            return
+        if self._waiting_for_user:
             return
         self.app.paused = True
         self._paused.clear()
@@ -121,13 +128,16 @@ class DialogueLoop:
 
     def resume(self):
         """恢复对话。若暂停是因为轮到用户，需用户先输入再恢复。"""
+        from core.debug import invariant
+        invariant(self.running, f"resume() 调用时 loop 未运行 (running={self.running})")
         if not self.running:
             return
         if self._waiting_for_user:
             if "You" in self.app._get_effective_order():
-                self.bus.emit("set_status", "轮到你了～")
+                self.bus.emit("set_status", "请先输入发言或跳过")
                 return
             self._waiting_for_user = False
+            self._user_turn_event.set()
         self.app.paused = False
         self._paused.set()
         self.bus.emit("resumed", None)
@@ -139,6 +149,7 @@ class DialogueLoop:
         若从 loop 线程内部调用（如 API 错误），跳过 join 避免 RuntimeError。
         始终 emit "stopped" 事件，确保 UI 一致刷新。
         """
+        from core.debug import invariant, validate_runtime_state
         self._stop_event.set()
         self._paused.set()  # 释放可能的暂停阻塞
         self._user_turn_event.set()  # 释放用户回合阻塞
@@ -149,7 +160,8 @@ class DialogueLoop:
         self.app.running = False
         self.app.paused = False
         # 清空对话历史与运行时状态（stop = 完全重置）
-        self.app.history.clear()
+        with self.app._history_lock:
+            self.app.history.clear()
         self.app.turn_idx = 0
         self.app.turn_count = 0
         self.app.message_count = 0
@@ -165,6 +177,7 @@ class DialogueLoop:
         self.app.chat._last_autosave_len = 0
         self.app.chat._clear_autosave()  # 清除过期自动存档，避免下次启动弹出恢复提示
         self.bus.emit("stopped", None)
+        validate_runtime_state(self.app)
         self.bus.emit("set_status", "已停止")
 
     def reset(self):
@@ -194,9 +207,8 @@ class DialogueLoop:
             "time": datetime.now().strftime("%H:%M:%S"),
             "type": "director",
         }
-        self.app.history.append(entry)
-        if len(self.app.history) > 500:
-            self.app.history.pop(0)
+        with self.app._history_lock:
+            self.app.history.append(entry)
         self.bus.emit("msg", entry)
 
     def send_user_message(self, text: str):
@@ -212,7 +224,8 @@ class DialogueLoop:
             "text": text,
             "time": datetime.now().strftime("%H:%M:%S"),
         }
-        self.app.history.append(entry)
+        with self.app._history_lock:
+            self.app.history.append(entry)
         self.app.turn_idx += 1
         self.app.turn_count += 1
         self.app._char_turns_since_event += 1
@@ -250,10 +263,20 @@ class DialogueLoop:
                     **scene, "version": self.app.scene_version,
                     "manual": True, "is_time_gen": True,
                 })
+            elif err and not self._stop_event.is_set():
+                self.bus.emit("set_status", f"按时间生成场景失败: {err[:60]}")
+                self.app.scene_idx = 0
 
         current_thread = threading.current_thread()
+        _loop_iters = 0
         while not self._stop_event.is_set():
             try:
+                # 周期性运行时状态检查（每 20 次迭代）
+                _loop_iters += 1
+                if _loop_iters % 20 == 0:
+                    from core.debug import validate_runtime_state
+                    validate_runtime_state(self.app)
+
                 # 暂停态：空转等待
                 self._paused.wait()
                 if self._stop_event.is_set():
@@ -299,21 +322,14 @@ class DialogueLoop:
                     self._paused.clear()
                     self.bus.emit("user_turn", None)
                     self.bus.emit("set_status", "轮到你了～")
-                    # 等待用户输入
                     self._user_turn_event.wait()
                     self._user_turn_event.clear()
                     if self._stop_event.is_set():
                         break
-                    # 用户输入或跳过后，恢复运行
-                    if not self._user_input_skip and self._user_input_text:
-                        self.app.paused = False
-                        self._paused.set()
-                        self.bus.emit("set_status", "运行中")
-                    else:
-                        # 跳过：恢复运行
-                        self.app.paused = False
-                        self._paused.set()
-                        self.bus.emit("set_status", "运行中")
+                    self.app.paused = False
+                    self._paused.set()
+                    self.bus.emit("resumed", None)
+                    self.bus.emit("set_status", "运行中")
                     continue
 
                 # ═══ 调 LLM ═══
@@ -352,9 +368,8 @@ class DialogueLoop:
                     "text": text.strip(),
                     "time": datetime.now().strftime("%H:%M:%S"),
                 }
-                self.app.history.append(entry)
-                if len(self.app.history) > 500:
-                    self.app.history.pop(0)
+                with self.app._history_lock:
+                    self.app.history.append(entry)
                 self.app.turn_idx += 1
                 self.app.turn_count += 1
                 self.app._char_turns_since_event += 1
@@ -363,11 +378,14 @@ class DialogueLoop:
                 self.app.message_count += 1
                 self.bus.emit("msg", entry)
 
-                # 等待（速度控制）
-                for _ in range(int(self.app.speed * 10)):
-                    if self._stop_event.is_set() or self.paused:
+                # 等待（速度控制），每 0.1s 检查暂停
+                total = self.app.speed * 0.1
+                elapsed = 0.0
+                while elapsed < total and not self._stop_event.is_set():
+                    self._paused.wait(0.1)
+                    if not self._paused.is_set():
                         break
-                    time.sleep(0.1)
+                    elapsed += 0.1
 
             except Exception as e:
                 print(f"[loop] 异常: {e}")
@@ -381,7 +399,10 @@ class DialogueLoop:
         if self.app._active_npc is None:
             return False
 
-        last_msg = self.app.history[-1] if self.app.history else None
+        try:
+            last_msg = self.app.history[-1] if self.app.history else None
+        except IndexError:
+            last_msg = None
         last_text = last_msg.get("text", "") if last_msg else ""
 
         # 检测角色是否提到 NPC
@@ -399,8 +420,6 @@ class DialogueLoop:
                 print(f"[random_npc] NPC '{npc_name}' rounds exhausted, departing")
                 if "离开" not in response:
                     response = response + " *说完便转身离开了*"
-                self.app._active_npc = None
-                self.app._char_turns_since_event = 0
             entry = {
                 "name": "__random__",
                 "display_name": npc_name,
@@ -418,10 +437,7 @@ class DialogueLoop:
 
         # 未提及 → 累积沉默
         elif last_msg and last_msg.get("type") not in ("random_npc", "random_event", "director"):
-            if self.app._npc_silent_turns == -1:
-                self.app._npc_silent_turns = 0
-            else:
-                self.app._npc_silent_turns += 1
+            self.app._npc_silent_turns += 1
             print(f"[random_npc] not mentioned ({self.app._npc_silent_turns}/4)")
             if self.app._npc_silent_turns >= 4:
                 npc_name = self.app._active_npc["name"]
@@ -434,8 +450,6 @@ class DialogueLoop:
                     "type": "random_npc",
                     "is_farewell": True,
                 }
-                self.app._active_npc = None
-                self.app._char_turns_since_event = 0
                 self._emit_npc_message(entry)
                 if not self.paused:
                     self.bus.emit("set_status", "运行中")
@@ -454,7 +468,7 @@ class DialogueLoop:
             dialogue = result.get("dialogue", "")
             self.app._active_npc = {"name": npc_name, "desc": npc_desc}
             self.app._npc_rounds_left = 2
-            self.app._npc_silent_turns = -1
+            self.app._npc_silent_turns = 0
             print(f"[random_npc] introduced: '{npc_name}' rounds_left=2")
             entry = {
                 "name": "__random__",
@@ -474,18 +488,16 @@ class DialogueLoop:
                 "time": datetime.now().strftime("%H:%M:%S"),
                 "type": "random_event",
             }
-            self.app.history.append(entry)
-            if len(self.app.history) > 500:
-                self.app.history.pop(0)
+            with self.app._history_lock:
+                self.app.history.append(entry)
             self.app.turn_count += 1
             self.app.message_count += 1
             self.bus.emit("random_event_msg", entry)
 
     def _emit_npc_message(self, entry: dict):
         """发送 NPC 消息并更新 history/计数。"""
-        self.app.history.append(entry)
-        if len(self.app.history) > 500:
-            self.app.history.pop(0)
+        with self.app._history_lock:
+            self.app.history.append(entry)
         self.app.turn_count += 1
         self.app.message_count += 1
         self.bus.emit("random_npc_msg", entry)
@@ -495,7 +507,6 @@ class DialogueLoop:
 
     def _apply_scene_update(self, scene_dict: dict):
         """应用场景切换（来自 [SCENE] 标签）。"""
-        old_scene = dict(self.app.current_scene) if self.app.current_scene else {}
         if not self.app.current_scene:
             self.app.current_scene = {}
         # 合并：time/location 有则覆盖，scene 必覆盖
@@ -503,7 +514,8 @@ class DialogueLoop:
             self.app.current_scene["time"] = scene_dict["time"]
         if scene_dict.get("location"):
             self.app.current_scene["location"] = scene_dict["location"]
-        self.app.current_scene["scene"] = scene_dict.get("scene", "")
+        if scene_dict.get("scene"):
+            self.app.current_scene["scene"] = scene_dict["scene"]
         if "mood" in scene_dict:
             self.app.current_scene["mood"] = scene_dict["mood"]
         self.app.scene_version += 1
@@ -523,6 +535,8 @@ class DialogueLoop:
     def prev_scene(self):
         """上一个场景（含"按时间生成"位 -1）。"""
         n = len(self.app.scenes) if self.app.scenes else 0
+        if n == 0:
+            return
         if self.app.scene_idx == -1:
             self.app.scene_idx = n - 1 if n > 0 else 0
         elif self.app.scene_idx == 0:
@@ -533,6 +547,8 @@ class DialogueLoop:
 
     def next_scene(self):
         n = len(self.app.scenes) if self.app.scenes else 0
+        if n == 0:
+            return
         if self.app.scene_idx == -1:
             self.app.scene_idx = 0
         elif self.app.scene_idx == n - 1:

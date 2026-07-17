@@ -20,7 +20,7 @@ FONT_SC_PATH = ASSETS_DIR / "NotoSansSC-Regular.ttf"
 FONT_SC_NAME = "Noto Sans SC"  # Flet 内部引用名
 
 # ═══ 全局 JSON 配置（跨剧本共享的 API / App 设置）═══
-app_config = load_json(BASE_DIR / "config.json")
+app_config = load_json(BASE_DIR / "config.json", default={})
 
 
 def resolve_key():
@@ -53,6 +53,10 @@ MODELS_LIST = MC.get("models", [])
 TEMPERATURE = MC.get("temperature", 0.85)
 MAX_TOKENS = MC.get("max_tokens", 300)
 ACTIVE_PROFILE = app_config.get("active_profile", "dorm_life")
+
+# ═══ SSL / 代理配置 ═══
+API_VERIFY_SSL = True   # HTTPS 证书校验；自签证书环境需关闭
+API_TRUST_ENV = True    # 读取系统代理环境变量；WSL 代理冲突时可关闭
 
 # ═══ 随机事件默认参数（用户不可调，仅作为内置常量）═══
 RANDOM_EVENT_DEFAULTS = {

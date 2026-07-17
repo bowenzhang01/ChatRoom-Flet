@@ -5,6 +5,7 @@
 子类实现 build() 返回根控件，on_enter() 在路由进入时调用。
 """
 
+import time
 import flet as ft
 
 __all__ = ["ViewBase"]
@@ -20,6 +21,7 @@ class ViewBase:
         self.router = router
         self._root: ft.Control = None
         self._snack_bar: ft.SnackBar = None
+        self._last_snack_time = 0.0
 
     def build(self) -> ft.Control:
         return ft.Container(
@@ -38,12 +40,23 @@ class ViewBase:
     def _snack(self, msg: str, duration: int = 2500):
         """显示自动消失的 SnackBar 提示。
 
-        替代旧的 _toast（AlertDialog 需手动点"好"关闭）。
-        SnackBar 加入 page.overlay，设 open=True 自动显示，
-        duration 到期后自动消失。
+        SnackBar 加入 page.overlay，设 open=True 自动显示。
+        若 500ms 内连续调用则复用现有 SnackBar，避免闪烁。
         """
         try:
-            # 移除旧的 SnackBar（避免 overlay 堆积）
+            now = time.time()
+            merged = now - self._last_snack_time < 0.5
+            self._last_snack_time = now
+            if merged and self._snack_bar is not None and hasattr(self._snack_bar, "content"):
+                try:
+                    self._snack_bar.content.value = msg
+                    self._snack_bar.duration = duration
+                    self._snack_bar.open = True
+                    self.page.update()
+                    return
+                except Exception:
+                    pass
+            # 移除旧的 SnackBar
             if self._snack_bar is not None:
                 try:
                     self._snack_bar.open = False
@@ -61,5 +74,4 @@ class ViewBase:
             sb.open = True
             self.page.update()
         except Exception:
-            # 降级：若 SnackBar 不可用，至少不崩溃
             pass

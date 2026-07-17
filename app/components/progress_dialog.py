@@ -188,9 +188,14 @@ class ProgressDialog:
             return
         self._closed = True
         try:
-            self.page.pop_dialog()
+            if self._dialog is not None:
+                self._dialog.open = False
+                self.page.update()
         except Exception:
-            pass
+            try:
+                self.page.pop_dialog()
+            except Exception:
+                pass
         if self._on_close_cb:
             try:
                 self._on_close_cb()

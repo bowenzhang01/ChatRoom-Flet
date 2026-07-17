@@ -29,6 +29,10 @@ class DataManager:
         if not config.PROFILES_DIR.exists() or not any(
             p.is_dir() for p in config.PROFILES_DIR.iterdir()
         ):
+            # 仅当无活跃剧本或活跃剧本目录不存在时才执行迁移
+            active = config.app_config.get("active_profile", "")
+            if active and (config.PROFILES_DIR / active).is_dir():
+                return
             default_name = "dorm_life"
             default_profile = config.PROFILES_DIR / default_name
             default_profile.mkdir(parents=True, exist_ok=True)
@@ -54,13 +58,13 @@ class DataManager:
                     "director_mode": old_ac.get("director_mode", False),
                     "user_mode": old_ac.get("user_mode", False),
                     "dynamic_scene": old_ac.get("dynamic_scene", False),
+                    "random_event": False,
                 },
                 "turn": {
                     "order": old_turn.get("order", []),
                     "history_size": old_turn.get("history_size", 8),
                 },
                 "speed": {"default": config.app_config.get("speed", {}).get("default", 3)},
-                "random_event": dict(config.RANDOM_EVENT_DEFAULTS, enabled=False),
             }
             save_json(default_profile / "config.json", profile_config_data)
 
@@ -82,7 +86,7 @@ class DataManager:
         app.char_dir.mkdir(parents=True, exist_ok=True)
         (app.profile_dir / "chats").mkdir(exist_ok=True)
 
-        app._profile_config = load_json(app.profile_dir / "config.json")
+        app._profile_config = load_json(app.profile_dir / "config.json", default={})
         ac = app._profile_config.get("app", {})
         tc = app._profile_config.get("turn", {})
         sc = app._profile_config.get("speed", {})
@@ -100,6 +104,16 @@ class DataManager:
 
         # 随机事件状态（参数用 config 默认值，不从 profile 读取）
         app.random_event_enabled = ac.get("random_event", False)
+        # 向后兼容：旧配置将 random_event 放在顶层（dict 带 enabled 字段），迁移到 app 下
+        top_random = app._profile_config.get("random_event")
+        if isinstance(top_random, dict):
+            app.random_event_enabled = top_random.get("enabled", False)
+            ac["random_event"] = app.random_event_enabled
+            del app._profile_config["random_event"]
+            try:
+                save_json(app.profile_dir / "config.json", app._profile_config)
+            except Exception:
+                pass
         app._last_random_event_turn = 0
         app._char_turns_since_event = 0
         app._active_npc = None
@@ -108,9 +122,7 @@ class DataManager:
 
         # 加载场景
         app.scenes = load_json(app.profile_dir / "scenes.json") or []
-        if not app.scenes:
-            app.scenes = [{"time": "傍晚", "location": "", "scene": "一个普通的场景", "mood": "普通"}]
-        app.scene_idx = 0
+        app.scene_idx = 0 if app.scenes else -1
 
         # 加载角色
         self._reload_data()
@@ -126,6 +138,13 @@ class DataManager:
         # 用户模式开启且 You 存在但不在顺序中 → 自动追加
         if app.user_mode and "You" in app.characters and "You" not in app.turn_order:
             app.turn_order.append("You")
+
+        app.current_scene = None
+        app.scene_version = 0
+        app._last_scene_update_turn = -1
+
+        from core.debug import validate_profile
+        validate_profile(app)
 
     # ── Profile 查询 ──
 
@@ -147,7 +166,7 @@ class DataManager:
 
     def profile_name_to_display(self, folder_name):
         """文件夹名 → 显示名"""
-        pc = load_json(config.PROFILES_DIR / folder_name / "config.json")
+        pc = load_json(config.PROFILES_DIR / folder_name / "config.json", default={})
         return pc.get("app", {}).get("title", pc.get("app", {}).get("display_name", folder_name))
 
     def profile_display_to_name(self, display_name):
@@ -200,6 +219,31 @@ class DataManager:
             return True
         return False
 
+    def _migrate_character_in_chats(self, old_name, new_name,
+                                     old_display_name=None, new_display_name=None):
+        """迁移所有聊天存档中的角色名/显示名引用。"""
+        chats_dir = self.app.profile_dir / "chats"
+        if not chats_dir.exists():
+            return
+        for f in list(chats_dir.glob("chat_*.json")) + list(chats_dir.glob("_autosave.json")):
+            try:
+                data = load_json(f)
+                if not data or "history" not in data:
+                    continue
+                modified = False
+                for entry in data["history"]:
+                    if entry.get("name") == old_name:
+                        entry["name"] = new_name
+                        modified = True
+                    if (old_display_name and new_display_name
+                            and entry.get("display_name") == old_display_name):
+                        entry["display_name"] = new_display_name
+                        modified = True
+                if modified:
+                    save_json(f, data)
+            except Exception:
+                pass
+
     def _reload_data(self):
         """从当前剧本目录重新加载角色/样式。"""
         app = self.app
@@ -207,13 +251,16 @@ class DataManager:
             return
         new_chars = {}
         new_styles = {}
+        char_load_errors = []
         if app.char_dir.exists():
             for f in sorted(app.char_dir.glob("*.json")):
                 try:
                     c = json.loads(f.read_text("utf-8"))
                     new_chars[c["name"]] = c
                 except Exception as e:
+                    char_load_errors.append(f.name)
                     print(f"[data] 角色加载失败 {f.name}: {e}")
+        app._char_load_errors = char_load_errors
         for c in new_chars.values():
             new_styles[c["name"]] = {
                 "color": c.get("color", "#888"),
@@ -226,12 +273,20 @@ class DataManager:
     # ── 剧本管理 ──
 
     def _make_safe_folder_name(self, display_name: str) -> str:
-        """中文显示名 → 安全英文文件夹名。ASCII 保留，其他用 md5 前 8 位。"""
+        """中文显示名 → 安全英文文件夹名。ASCII 保留，其他用 md5 前 8 位。
+        冲突时自动追加 _2, _3 后缀。"""
         import hashlib
         safe = "".join(c for c in display_name if c.isascii() and (c.isalnum() or c == "_"))
         if safe and not safe[0].isdigit():
-            return safe.lower()
-        return "profile_" + hashlib.md5(display_name.encode("utf-8")).hexdigest()[:8]
+            base = safe.lower()
+        else:
+            base = "profile_" + hashlib.md5(display_name.encode("utf-8")).hexdigest()[:8]
+        candidate = base
+        idx = 1
+        while (config.PROFILES_DIR / candidate).exists():
+            idx += 1
+            candidate = f"{base}_{idx}"
+        return candidate
 
     def create_profile(self, display_name: str) -> str:
         """新建剧本。返回文件夹名（成功）或空字符串（失败）。"""
@@ -274,6 +329,6 @@ class DataManager:
     def rename_profile(self, folder_name: str, new_display_name: str) -> bool:
         """重命名剧本（仅改 config.json 的 title 字段）"""
         pc_path = config.PROFILES_DIR / folder_name / "config.json"
-        pc = load_json(pc_path)
+        pc = load_json(pc_path, default={})
         pc.setdefault("app", {})["title"] = new_display_name
         return save_json(pc_path, pc)

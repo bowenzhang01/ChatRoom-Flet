@@ -37,9 +37,7 @@ def get_user_data_dir() -> Path:
             return Path(files_dir)
         except Exception:
             try:
-                # 备选：flet 包内部路径
-                import flet
-                return Path(flet.__file__).parent / "data"
+                return Path.home() / ".dorm-flet"
             except Exception:
                 pass
     return config.BASE_DIR
@@ -69,5 +67,5 @@ def setup_workspace() -> Path:
     # 切换全局路径到可写目录
     config.BASE_DIR = ud
     config.PROFILES_DIR = writable_profiles
-    config.app_config = load_json(writable_config)
+    config.app_config = load_json(writable_config, default={})
     return config.PROFILES_DIR

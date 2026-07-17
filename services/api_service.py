@@ -96,7 +96,8 @@ def call_chat_completion(
     url = f"{api_base}/chat/completions"
     print(f"[api] POST {url} | model={model} | timeout={timeout}s")
     try:
-        with httpx.Client(timeout=timeout, verify=False, trust_env=False) as client:
+        with httpx.Client(timeout=timeout, verify=config.API_VERIFY_SSL,
+                          trust_env=config.API_TRUST_ENV) as client:
             r = client.post(
                 url,
                 headers={
@@ -192,7 +193,8 @@ def fetch_models(
     api_base = api_base.strip()
 
     try:
-        with httpx.Client(timeout=timeout, verify=False, trust_env=False) as client:
+        with httpx.Client(timeout=timeout, verify=config.API_VERIFY_SSL,
+                          trust_env=config.API_TRUST_ENV) as client:
             r = client.get(
                 f"{api_base}/models",
                 headers={"Authorization": f"Bearer {api_key}"},
@@ -244,7 +246,8 @@ def test_connection_async(
             if api_base is None:
                 api_base = config.API_BASE
             api_base = api_base.strip() if api_base else api_base
-            with httpx.Client(timeout=timeout, verify=False, trust_env=False) as client:
+            with httpx.Client(timeout=timeout, verify=config.API_VERIFY_SSL,
+                          trust_env=config.API_TRUST_ENV) as client:
                 r = client.get(
                     f"{api_base}/models",
                     headers={"Authorization": f"Bearer {api_key}"},
@@ -252,10 +255,13 @@ def test_connection_async(
                 r.raise_for_status()
                 data = r.json()
                 count = len(data.get("data", []))
-                on_result(True, f"连接正常，可用模型 {count} 个")
+                if on_result:
+                    on_result(True, f"连接正常，可用模型 {count} 个")
         except APIError as e:
-            on_result(False, str(e))
+            if on_result:
+                on_result(False, str(e))
         except Exception as e:
-            on_result(False, _parse_error(e))
+            if on_result:
+                on_result(False, _parse_error(e))
 
     threading.Thread(target=_run, daemon=True).start()

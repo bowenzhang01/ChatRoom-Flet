@@ -142,14 +142,7 @@ class ProfilesView(ViewBase):
 
     def _on_section_change(self, e):
         sel = e.control.selected
-        val = 0
-        if isinstance(sel, (list, tuple)):
-            val = sel[0] if sel else 0
-        elif isinstance(sel, set):
-            val = next(iter(sel), 0)
-        elif isinstance(sel, (int, str)):
-            val = sel
-        self._detail_section = int(val)
+        self._detail_section = int(next(iter(sel), 0))
         self._render_detail_body()
 
     def _render_detail_body(self):
@@ -171,7 +164,6 @@ class ProfilesView(ViewBase):
 
     # ── 概览 ──
     def _section_overview(self) -> ft.Control:
-        cfg = self.state._profile_config.get("app", {})
         world = self.state._profile_config.get("world", {}).get("setting", "")
         title_f = ft.TextField(label="应用标题", value=self.state.title, dense=True)
         world_f = ft.TextField(label="世界观", value=world, multiline=True, min_lines=3, max_lines=5)
@@ -435,6 +427,15 @@ class ProfilesView(ViewBase):
                 # 如果改名了，删除旧文件
                 new_name = merged.get("name", name)
                 if new_name != name:
+                    # 迁移 history 中的旧角色名引用
+                    with self.state._history_lock:
+                        for entry in self.state.history:
+                            if entry.get("name") == name:
+                                entry["name"] = new_name
+                    # 迁移磁盘存档中的旧角色名/显示名引用
+                    new_display_name = merged.get("display_name", "")
+                    self.state.data._migrate_character_in_chats(
+                        name, new_name, dname, new_display_name)
                     self.state.data._delete_character(name)
                     if name in self.state.turn_order:
                         idx = self.state.turn_order.index(name)
@@ -535,6 +536,19 @@ class ProfilesView(ViewBase):
             old_name = name
             try:
                 if old_name and old_name != data["name"]:
+                    if data["name"] in self.state.characters:
+                        self._snack(f"角色名「{data['name']}」已存在，请使用其他名字")
+                        return
+                    # 迁移 history 中的旧角色名引用
+                    with self.state._history_lock:
+                        for entry in self.state.history:
+                            if entry.get("name") == old_name:
+                                entry["name"] = data["name"]
+                    # 迁移磁盘存档中的旧角色名/显示名引用
+                    old_display_name = c.get("display_name", "")
+                    new_display_name = data.get("display_name", "")
+                    self.state.data._migrate_character_in_chats(
+                        old_name, data["name"], old_display_name, new_display_name)
                     self.state.data._save_character(fname, data)
                     self.state.data._reload_data()
                     if old_name in self.state.turn_order:
@@ -592,7 +606,13 @@ class ProfilesView(ViewBase):
                 self._snack("用户角色不可复制")
                 return
             c = dict(self.state.characters.get(name, {}))
-            c["name"] = c.get("name", "char") + "_copy"
+            base = c.get("name", "char") + "_copy"
+            new_name = base
+            idx = 2
+            while new_name in self.state.characters:
+                new_name = f"{base}{idx}"
+                idx += 1
+            c["name"] = new_name
             c["display_name"] = c.get("display_name", "") + " 副本"
             try:
                 self.state.data._save_character(c["name"] + ".json", c)
@@ -719,18 +739,42 @@ class ProfilesView(ViewBase):
             self._show_card_menu_sheet(folder)
 
     def _show_card_menu_sheet(self, folder: str):
-        # 长按：弹底部菜单（简单用 dialog）
-        dlg = ft.AlertDialog(
-            title=ft.Text(gather_profile_meta(folder)["title"]),
-            content=ft.Text("选择操作"),
-            actions=[
-                ft.TextButton("重命名", on_click=lambda e: (self._close_dialog(), self._rename_dialog(folder))),
-                ft.TextButton("复制", on_click=lambda e: (self._close_dialog(), self._duplicate_profile(folder))),
-                ft.TextButton("删除", on_click=lambda e: (self._close_dialog(), self._delete_dialog(folder))),
-                ft.TextButton("取消", on_click=lambda e: self._close_dialog()),
-            ],
+        meta = gather_profile_meta(folder)
+        sheet = ft.BottomSheet(
+            content=ft.Container(
+                content=ft.Column(
+                    controls=[
+                        ft.Text(meta["title"], size=16, weight=ft.FontWeight.W_600),
+                        ft.Divider(height=1),
+                        ft.ListTile(
+                            leading=ft.Icon(ft.Icons.EDIT),
+                            title=ft.Text("重命名"),
+                            on_click=lambda e: (self._close_sheet(), self._rename_dialog(folder)),
+                        ),
+                        ft.ListTile(
+                            leading=ft.Icon(ft.Icons.CONTENT_COPY),
+                            title=ft.Text("复制"),
+                            on_click=lambda e: (self._close_sheet(), self._duplicate_profile(folder)),
+                        ),
+                        ft.ListTile(
+                            leading=ft.Icon(ft.Icons.DELETE_OUTLINE),
+                            title=ft.Text("删除"),
+                            on_click=lambda e: (self._close_sheet(), self._delete_dialog(folder)),
+                        ),
+                    ],
+                    spacing=4, tight=True,
+                ),
+                padding=ft.Padding.symmetric(horizontal=16, vertical=12),
+            ),
         )
-        self.page.show_dialog(dlg)
+        self._opened_sheet = sheet
+        self.page.show_bottom_sheet(sheet)
+
+    def _close_sheet(self):
+        try:
+            self.page.close_bottom_sheet()
+        except Exception:
+            pass
 
     # ── 新建 ──
     def _new_profile_dialog(self):
@@ -827,7 +871,7 @@ class ProfilesView(ViewBase):
             shutil.copy2(str(src / "scenes.json"), str(dst / "scenes.json"))
             # 复制 config 但改 title
             from utils import load_json, save_json
-            pc = load_json(src / "config.json")
+            pc = load_json(src / "config.json", default={})
             pc.setdefault("app", {})["title"] = new_name
             save_json(dst / "config.json", pc)
         except Exception as ex:
@@ -839,7 +883,9 @@ class ProfilesView(ViewBase):
 
     # ── 导出 ──
     def _export_profile(self, folder: str):
-        # 简单实现：打包为 zip 放到用户目录（Web 下载在 0.85 较复杂，先用本地保存 + 提示）
+        if getattr(self.page, "web", False):
+            self._snack("Web 端暂不支持导出，请在桌面端操作")
+            return
         import zipfile, tempfile, os
         src = config.PROFILES_DIR / folder
         meta = gather_profile_meta(folder)
@@ -896,6 +942,23 @@ class ProfilesView(ViewBase):
         self.page.show_dialog(dlg)
 
     def _ai_step2(self, desc: str):
+        if self.state.history:
+            def _proceed(e=None):
+                self._close_dialog()
+                self._ai_step2_generate(desc)
+            dlg = ft.AlertDialog(
+                title=ft.Text("提示"),
+                content=ft.Text("当前有进行中的对话，AI 创建新剧本会清空当前对话并切换到新剧本。确定继续？"),
+                actions=[
+                    ft.TextButton("取消", on_click=lambda e: self._close_dialog()),
+                    ft.FilledButton("确定", on_click=_proceed),
+                ],
+            )
+            self.page.show_dialog(dlg)
+            return
+        self._ai_step2_generate(desc)
+
+    def _ai_step2_generate(self, desc: str):
         pdlg = ProgressDialog(self.page, title="✨ 生成中")
         pdlg.show(
             status="正在解析描述…",

@@ -25,6 +25,7 @@ class TurnOrderEditor:
         self._mode_dd: ft.Dropdown = None
         self._active_col: ft.Column = None
         self._standby_row: ft.Row = None
+        self._card_containers: dict[int, ft.Container] = {}
         self.root = self._build()
 
     def _build(self) -> ft.Control:
@@ -55,6 +56,7 @@ class TurnOrderEditor:
     def _build_active(self):
         order = list(self.state.turn_order)
         total = max(1, len([n for n in order if n in self.state.characters and n != "You"]))
+        self._card_containers.clear()
         rows = []
         for i, name in enumerate(order):
             if name not in self.state.characters:
@@ -130,6 +132,7 @@ class TurnOrderEditor:
             bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
             border=ft.Border.all(1, ft.Colors.TRANSPARENT),
         )
+        self._card_containers[index] = card
 
         drag = ft.Draggable(
             group="turn_order",
@@ -178,11 +181,11 @@ class TurnOrderEditor:
 
     def _make_will(self, index):
         def handler(e):
-            # 高亮目标位
             try:
-                tgt = e.control
-                tgt.content.content.border = ft.Border.all(2, ft.Colors.PRIMARY)
-                self.page.update()
+                card = self._card_containers.get(index)
+                if card:
+                    card.border = ft.Border.all(2, ft.Colors.PRIMARY)
+                    self.page.update()
             except Exception:
                 pass
         return handler
@@ -190,9 +193,10 @@ class TurnOrderEditor:
     def _make_leave(self, index):
         def handler(e):
             try:
-                tgt = e.control
-                tgt.content.content.border = ft.Border.all(1, ft.Colors.TRANSPARENT)
-                self.page.update()
+                card = self._card_containers.get(index)
+                if card:
+                    card.border = ft.Border.all(1, ft.Colors.TRANSPARENT)
+                    self.page.update()
             except Exception:
                 pass
         return handler
@@ -201,7 +205,9 @@ class TurnOrderEditor:
         def handler(e):
             src = self._dragging
             try:
-                e.control.content.content.border = ft.Border.all(1, ft.Colors.TRANSPARENT)
+                card = self._card_containers.get(target_index)
+                if card:
+                    card.border = ft.Border.all(1, ft.Colors.TRANSPARENT)
             except Exception:
                 pass
             if src is None or src == target_index:

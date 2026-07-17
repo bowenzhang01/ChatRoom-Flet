@@ -60,10 +60,13 @@ def main(page: ft.Page):
     # ── 生命周期：自动存档 ──
     def _on_window_event(e):
         if e.type == ft.WindowEventType.CLOSE:
-            try:
-                app_state.auto_save()
-            except Exception:
-                pass
+            t = threading.Thread(target=app_state.auto_save, daemon=True)
+            t.start()
+            t.join(timeout=2.0)
 
     page.window.on_event = _on_window_event
-    page.on_disconnect = lambda e: app_state.auto_save()
+    def _on_disconnect(e):
+        t = threading.Thread(target=app_state.auto_save, daemon=True)
+        t.start()
+        t.join(timeout=2.0)
+    page.on_disconnect = _on_disconnect

@@ -141,7 +141,7 @@ class ChatManager:
             "current_scene": self.app.current_scene,
             "turn_idx": self.app.turn_idx,
             "turn_count": self.app.turn_count,
-            "history": list(self.app.history),
+            "history": self.app.history_snapshot(),
         }
         return save_json(filepath, data)
 
@@ -179,7 +179,7 @@ class ChatManager:
 
         # 快照（防竞态：保存→AI标题→回写 期间 history 可能被清空）
         saved_data = {
-            "title": "保存中...",
+            "title": self._fallback_chat_title(),
             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "message_count": len(self.app.history),
@@ -187,7 +187,7 @@ class ChatManager:
             "current_scene": self.app.current_scene,
             "turn_idx": self.app.turn_idx,
             "turn_count": self.app.turn_count,
-            "history": list(self.app.history),
+            "history": self.app.history_snapshot(),
         }
         save_json(filepath, saved_data)
 
@@ -218,7 +218,7 @@ class ChatManager:
 
     def _generate_chat_title(self, callback):
         """AI 生成对话标题（后台线程），完成后调用 callback(title)"""
-        recent = self.app.history[-6:] if len(self.app.history) >= 4 else self.app.history[:]
+        recent = self.app.history_snapshot()[-6:] if len(self.app.history) >= 4 else self.app.history_snapshot()
         if not recent or not config.API_KEY:
             callback(self._fallback_chat_title())
             return
@@ -258,11 +258,13 @@ class ChatManager:
         if not data or "history" not in data:
             return False
 
+        from collections import deque
         app = self.app
-        app.history = data.get("history", [])
-        app.turn_idx = data.get("turn_idx", 0)
-        app.turn_count = data.get("turn_count", 0)
-        app.message_count = data.get("message_count", len(app.history))
+        with app._history_lock:
+            app.history = deque(data.get("history", []), maxlen=500)
+            app.turn_idx = data.get("turn_idx", 0)
+            app.turn_count = data.get("turn_count", 0)
+            app.message_count = data.get("message_count", len(app.history))
         # 重建沉默追踪
         app._char_last_turn = {}
         for i, entry in enumerate(reversed(app.history)):

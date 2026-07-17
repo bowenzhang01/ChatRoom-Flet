@@ -178,6 +178,7 @@ class SettingsView(ViewBase):
                 config.API_KEY = self._key_field.value or ""
             config.API_BASE = self._base_field.value or config.API_BASE
             config.MODEL = self._model_dd.value or config.MODEL
+            config.MODELS_LIST = mc2["models"]
             config.TEMPERATURE = float(self._temp_slider.value)
             config.MAX_TOKENS = int(self._tokens_slider.value)
             self._api_status_dot.bgcolor = ft.Colors.TERTIARY if config.API_KEY else ft.Colors.OUTLINE
@@ -252,17 +253,12 @@ class SettingsView(ViewBase):
         )
         self._color_theme_dd = color_theme_dd
 
-        font_slider = ft.Slider(min=12, max=20, divisions=8, value=14, label="{value}",
-                                on_change=self._on_font_change)
         return self._card("外观", [
             ft.Text("主题模式", size=12, color=ft.Colors.ON_SURFACE_VARIANT),
             seg,
             ft.Container(height=8),
             ft.Text("色彩主题", size=12, color=ft.Colors.ON_SURFACE_VARIANT),
             color_theme_dd,
-            ft.Container(height=4),
-            ft.Text("字体大小（部分控件预览）", size=12, color=ft.Colors.ON_SURFACE_VARIANT),
-            font_slider,
         ])
 
     def _on_color_theme_change(self, e):
@@ -277,23 +273,10 @@ class SettingsView(ViewBase):
     def _on_theme_change(self, e):
         sel = e.control.selected
         if sel:
-            if isinstance(sel, (list, tuple)):
-                self.ui.theme_mode_key = sel[0]
-            elif isinstance(sel, set):
-                self.ui.theme_mode_key = next(iter(sel))
+            self.ui.theme_mode_key = next(iter(sel))
             self.ui.save_theme_mode()
             self.page.theme_mode = THEME_MODES[self.ui.theme_mode_key]
             self.page.update()
-
-    def _on_font_change(self, e):
-        size = int(e.control.value)
-        ui = config.app_config.setdefault("ui", {})
-        ui["font_size"] = size
-        try:
-            from utils import save_json
-            save_json(config.BASE_DIR / "config.json", config.app_config)
-        except Exception:
-            pass
 
     # ═══ 默认行为 ═══
     def _build_behavior_card(self) -> ft.Control:
@@ -305,6 +288,7 @@ class SettingsView(ViewBase):
         self._random_sw = ft.Switch(label="随机事件", value=self.state.random_event_enabled)
 
         def _persist(e=None):
+            pc = self.state._profile_config.setdefault("app", {})
             pc["director_mode"] = self._director_sw.value
             pc["user_mode"] = self._user_sw.value
             pc["dynamic_scene"] = self._dynamic_sw.value
@@ -407,6 +391,17 @@ class SettingsView(ViewBase):
         if not self._built:
             return
         self._apply_api_settings()
+        try:
+            mc = config.app_config.setdefault("model", {})
+            mc["api_base"] = config.API_BASE
+            if config.key_source() != "env":
+                mc["api_key"] = config.API_KEY
+            mc["model"] = config.MODEL
+            mc["temperature"] = config.TEMPERATURE
+            mc["max_tokens"] = config.MAX_TOKENS
+            self.state.data._save_config()
+        except Exception:
+            pass
 
     def _sync_api_fields(self):
         if self._base_field:

@@ -5,6 +5,8 @@
   仅在对应模式时滑入（由 chat_view 控制 show/hide）。
 """
 
+import threading
+
 import flet as ft
 
 from app.theme import RADIUS_PILL
@@ -23,6 +25,7 @@ class DirectorInput:
         self._send_btn: ft.FilledButton = None
         self._skip_btn: ft.TextButton = None
         self._hint: ft.Text = None
+        self._feedback_timer: threading.Timer = None
         self.root = self._build()
 
     def _build(self) -> ft.Control:
@@ -130,9 +133,31 @@ class DirectorInput:
             self.page.update()
         except Exception:
             pass
-        # 用户模式发送后隐藏（回合结束）；导演模式保持显示
-        if self.mode == "user":
-            self.hide()
+        # 导演模式发送后显示短暂反馈
+        if self.mode == "director":
+            self._show_sent_feedback()
+
+    def _show_sent_feedback(self):
+        saved_hint = self._hint.value
+        saved_color = self._hint.color
+        self._hint.value = "✓ 已发送"
+        self._hint.color = ft.Colors.TERTIARY
+        try:
+            self.page.update()
+        except Exception:
+            pass
+        def _reset():
+            self._hint.value = saved_hint
+            self._hint.color = saved_color
+            try:
+                self.page.update()
+            except Exception:
+                pass
+        if self._feedback_timer:
+            self._feedback_timer.cancel()
+        self._feedback_timer = threading.Timer(1.5, _reset)
+        self._feedback_timer.daemon = True
+        self._feedback_timer.start()
 
     def _try_focus(self):
         try:

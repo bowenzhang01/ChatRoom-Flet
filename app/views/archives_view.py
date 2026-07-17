@@ -26,6 +26,7 @@ class ArchivesView(ViewBase):
     def __init__(self, page, app_state, ui_state, router):
         super().__init__(page, app_state, ui_state, router)
         self._header_container: ft.Container = None
+        self._search_field: ft.TextField = None
         self._body: ft.Container = None
         self._built = False
         self._save_dialog: ProgressDialog = None
@@ -35,9 +36,15 @@ class ArchivesView(ViewBase):
         self._header_container = ft.Container(
             padding=ft.Padding.symmetric(horizontal=16, vertical=12),
         )
+        self._search_field = ft.TextField(
+            hint_text="搜索…", dense=True, border_radius=20,
+            suffix=ft.Icon(ft.Icons.SEARCH, size=16),
+            on_change=lambda e: self._render(),
+            on_submit=lambda e: self._render(),
+        )
         self._body = ft.Container(expand=True, padding=ft.Padding.all(16))
         self._root = ft.Column(
-            controls=[self._header_container, self._body],
+            controls=[self._header_container, self._search_field, self._body],
             spacing=0,
             expand=True,
         )
@@ -109,6 +116,11 @@ class ArchivesView(ViewBase):
     def _build_profile_list(self) -> ft.Control:
         profiles = self.state.data.get_profile_list()
         active = config.app_config.get("active_profile", "")
+        query = (self._search_field.value or "").strip().lower() if self._search_field else ""
+        if query:
+            profiles = [p for p in profiles if
+                        query in p.lower() or
+                        query in gather_profile_meta(p)["title"].lower()]
         if not profiles:
             return self._empty_hint("暂无剧本", "请先在剧本库中创建剧本")
         items = []
@@ -152,15 +164,28 @@ class ArchivesView(ViewBase):
 
     def _open_profile(self, folder: str):
         self._selected_folder = folder
+        self._clear_search()
         self._render()
 
     def _back_to_list(self):
         self._selected_folder = None
+        self._clear_search()
         self._render()
+
+    def _clear_search(self):
+        if self._search_field:
+            self._search_field.value = ""
+            try:
+                self._search_field.update()
+            except Exception:
+                pass
 
     # ── 第二级：存档列表 ──
     def _build_chats_list(self, folder: str) -> ft.Control:
         chats = self.state.chat.list_chats_for_profile(folder)
+        query = (self._search_field.value or "").strip().lower() if self._search_field else ""
+        if query:
+            chats = [(p, m) for p, m in chats if query in m.get("title", "").lower()]
         if not chats:
             return self._empty_hint("暂无存档", "开始对话后点击「保存当前」即可存档")
 
@@ -352,6 +377,19 @@ class ArchivesView(ViewBase):
         # 订阅保存事件
         self.state.bus.on("saving", self._on_saving)
         self.state.bus.on("saved", self._on_saved)
+        self._save_timed_out = False
+        # 超时兜底：30s 后标记超时，再等 30s 后才取消订阅
+        def _save_timeout():
+            import time as _t
+            _t.sleep(30)
+            self._save_timed_out = True
+            if self._save_dialog:
+                self._save_dialog.fail("保存超时，请重试")
+            # 宽限期：再给 30s 等待 AI 标题生成完成
+            _t.sleep(30)
+            self._unsubscribe_save_events()
+        import threading
+        threading.Thread(target=_save_timeout, daemon=True).start()
         try:
             self.state.chat.save_current_chat()
         except Exception as ex:
@@ -370,13 +408,19 @@ class ArchivesView(ViewBase):
         title = data.get("title", "") if isinstance(data, dict) else ""
         if self._save_dialog:
             if ok:
-                summary = f"保存成功：{title}" if title else "保存成功"
+                summary = f"保存成功（延迟）：{title}" if self._save_timed_out and title else (
+                    "保存成功（延迟）" if self._save_timed_out else
+                    (f"保存成功：{title}" if title else "保存成功")
+                )
                 self._save_dialog.set_step(2, "完成")
                 self._save_dialog.complete(summary, on_close=self._after_save_closed)
             else:
                 self._save_dialog.fail(msg)
         else:
-            self._snack(msg)
+            if self._save_timed_out:
+                self._snack(f"保存成功（延迟）：{title}" if title else "保存成功（延迟）")
+            else:
+                self._snack(msg)
         self._unsubscribe_save_events()
 
     def _unsubscribe_save_events(self):
@@ -425,11 +469,22 @@ class ArchivesView(ViewBase):
         self.page.show_dialog(dlg)
 
     def _discard(self, path):
-        try:
-            self.state.chat.discard_autosave(str(path))
-        except Exception:
-            pass
-        self._render()
+        def _ok(e=None):
+            try:
+                self.state.chat.discard_autosave(str(path))
+            except Exception:
+                pass
+            self._close_dialog()
+            self._render()
+        dlg = ft.AlertDialog(
+            title=ft.Text("放弃自动存档"),
+            content=ft.Text("确定放弃该自动存档？内容将被永久删除。"),
+            actions=[
+                ft.TextButton("取消", on_click=lambda e: self._close_dialog()),
+                ft.FilledButton("放弃", on_click=_ok),
+            ],
+        )
+        self.page.show_dialog(dlg)
 
     def _delete(self, path, title):
         def _ok(e=None):
@@ -473,13 +528,36 @@ class ArchivesView(ViewBase):
         self.page.show_dialog(dlg)
 
     def _copy_all(self):
-        lines = []
-        for entry in self.state.history:
-            dname = entry.get("display_name", entry.get("name", "?"))
-            t = entry.get("time", "")
-            txt = entry.get("text", "")
-            lines.append(f"{dname}  {t}\n{txt}")
-        text = "\n\n".join(lines)
+        active = config.app_config.get("active_profile", "")
+        if self._selected_folder and self._selected_folder != active:
+            chats = self.state.chat.list_chats_for_profile(self._selected_folder)
+            if not chats:
+                self._snack("该剧本无对话存档可复制")
+                return
+            from utils import load_json
+            data = load_json(Path(chats[0][0]))
+            hist = data.get("history", []) if data else []
+            if not hist:
+                self._snack("该存档无对话内容")
+                return
+            lines = []
+            for entry in hist:
+                dname = entry.get("display_name", entry.get("name", "?"))
+                t = entry.get("time", "")
+                txt = entry.get("text", "")
+                lines.append(f"{dname}  {t}\n{txt}")
+            text = "\n\n".join(lines)
+        else:
+            if not self.state.history:
+                self._snack("当前无对话内容可复制")
+                return
+            lines = []
+            for entry in self.state.history:
+                dname = entry.get("display_name", entry.get("name", "?"))
+                t = entry.get("time", "")
+                txt = entry.get("text", "")
+                lines.append(f"{dname}  {t}\n{txt}")
+            text = "\n\n".join(lines)
         try:
             self.page.clipboard.set(text)
             self._snack("已复制全部对话")

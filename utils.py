@@ -10,18 +10,18 @@ import re as _re
 from pathlib import Path
 
 
-def load_json(path):
+def load_json(path, default=None):
     """接受 Path 对象或字符串，返回解析后的 JSON。
-    配置文件缺失返回 {}，其他缺失返回 []。"""
+    文件缺失返回 default，默认 None；调用方应显式传 default。"""
     p = Path(path) if not isinstance(path, Path) else path
     if not p.exists():
-        return {} if "config" in str(p) else []
+        return default
     try:
         with open(p, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception as e:
         print(f"[load_json] 读取失败 {p}: {e}")
-        return {} if "config" in str(p) else []
+        return default
 
 
 def save_json(path, data):
@@ -45,6 +45,36 @@ def hex_to_rgba(h, a=1.0):
         r, g, b = int(h[0:2], 16) / 255, int(h[2:4], 16) / 255, int(h[4:6], 16) / 255
         return (r, g, b, a)
     return (1, 1, 1, a)
+
+
+def _find_balanced(text: str, start_pos: int):
+    """从 start_pos 开始找平衡的括号区间。返回 (start, end) 或 (None, None)。
+    正确处理 JSON 字符串内的括号和转义。"""
+    open_char = text[start_pos]
+    close_char = ']' if open_char == '[' else '}'
+    depth = 0
+    in_string = False
+    escape = False
+    for i in range(start_pos, len(text)):
+        c = text[i]
+        if escape:
+            escape = False
+            continue
+        if c == '\\':
+            escape = True
+            continue
+        if c == '"' and not in_string:
+            in_string = True
+        elif c == '"' and in_string:
+            in_string = False
+        elif not in_string:
+            if c == open_char:
+                depth += 1
+            elif c == close_char:
+                depth -= 1
+                if depth == 0:
+                    return (start_pos, i + 1)
+    return (None, None)
 
 
 def extract_json(text: str):
@@ -71,52 +101,41 @@ def extract_json(text: str):
     if result is not None:
         return result, None
 
-    # Step 3: 找最外层结构
-    # 判断根类型：看第一个非空白字符是 { 还是 [
+    # Step 3: 找最外层结构（平衡括号匹配，处理字符串内括号）
     stripped = text.lstrip()
     if stripped.startswith('['):
-        # 数组：找最外层 [ ... ]（贪心匹配到最后一个 ]）
-        m = _re.search(r'\[[\s\S]*\]', text)
-        if m:
-            candidate = m.group(0)
+        start = text.find('[')
+        s, e = _find_balanced(text, start)
+        if s is not None:
+            candidate = text[s:e]
             result = _try_parse_json(candidate)
             if result is not None:
                 return result, None
     elif stripped.startswith('{'):
-        # 对象：找最外层 { ... }
-        m = _re.search(r'\{[\s\S]*\}', text)
-        if m:
-            candidate = m.group(0)
+        start = text.find('{')
+        s, e = _find_balanced(text, start)
+        if s is not None:
+            candidate = text[s:e]
             result = _try_parse_json(candidate)
             if result is not None:
                 return result, None
     else:
-        # 不以 { 或 [ 开头：找最先出现的结构类型
-        brace_pos = text.find('{')
+        bracelet_pos = text.find('{')
         bracket_pos = text.find('[')
-        # 选择最先出现的（-1 表示不存在）
-        if bracket_pos >= 0 and (brace_pos < 0 or bracket_pos < brace_pos):
-            # 数组在前面或只有数组
-            m = _re.search(r'\[[\s\S]*\]', text)
-            if m:
-                candidate = m.group(0)
+        if bracket_pos >= 0 and (bracelet_pos < 0 or bracket_pos < bracelet_pos):
+            s, e = _find_balanced(text, bracket_pos)
+            if s is not None:
+                candidate = text[s:e]
                 result = _try_parse_json(candidate)
                 if result is not None:
                     return result, None
-        if brace_pos >= 0:
-            m = _re.search(r'\{[\s\S]*\}', text)
-            if m:
-                candidate = m.group(0)
+        if bracelet_pos >= 0:
+            s, e = _find_balanced(text, bracelet_pos)
+            if s is not None:
+                candidate = text[s:e]
                 result = _try_parse_json(candidate)
                 if result is not None:
                     return result, None
-        # 兜底：尝试另一种
-        m = _re.search(r'\[[\s\S]*\]', text)
-        if m:
-            candidate = m.group(0)
-            result = _try_parse_json(candidate)
-            if result is not None:
-                return result, None
 
     return None, "JSON解析失败"
 
@@ -124,27 +143,28 @@ def extract_json(text: str):
 def _try_parse_json(text: str):
     """尝试解析 JSON 文本，自动修复常见错误。
     返回 dict/list 或 None（解析失败）。"""
-    # 直接解析
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
-    # 修复尾部多余逗号
     try:
         fixed = _re.sub(r',\s*([}\]])', r'\1', text)
         return json.loads(fixed)
     except json.JSONDecodeError:
         pass
-    # 修复单引号 → 双引号
-    try:
-        fixed = _re.sub(r"'([^']*)'", r'"\1"', text)
-        return json.loads(fixed)
-    except json.JSONDecodeError:
-        pass
-    # 尝试 json5 宽松解析（如果可用）
     try:
         import json5
         return json5.loads(text)
     except Exception:
+        pass
+    try:
+        fixed = _re.sub(r"'(\w+)'\s*:", r'"\1":', text)
+        return json.loads(fixed)
+    except json.JSONDecodeError:
+        pass
+    try:
+        fixed = _re.sub(r"'([^']*)'", r'"\1"', text)
+        return json.loads(fixed)
+    except json.JSONDecodeError:
         pass
     return None

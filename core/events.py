@@ -26,29 +26,39 @@ ChatRoom - Flet Edition · 事件总线
     "autosave_prompt"  → 启动时检测到自动存档 (val={title, message_count, path})
 """
 
+import threading
 from collections import defaultdict
 from typing import Any, Callable
 
 
 class EventBus:
-    """轻量级事件总线。线程安全（订阅/触发使用 dict 原子操作）。"""
+    """轻量级事件总线。线程安全（on/off/emit 共享读-改-写锁）。"""
 
     def __init__(self):
         self._subs: dict[str, list[Callable[[Any], None]]] = defaultdict(list)
+        self._lock = threading.RLock()
 
     def on(self, event: str, handler: Callable[[Any], None]) -> None:
         """订阅事件。返回的 handler 可用于之后 off()。"""
-        self._subs[event].append(handler)
+        with self._lock:
+            self._subs[event].append(handler)
+        from core.debug import trace_bus_sub
+        trace_bus_sub(self, event, handler, "ON")
 
     def off(self, event: str, handler: Callable[[Any], None]) -> None:
         """取消订阅。"""
-        if handler in self._subs[event]:
-            self._subs[event].remove(handler)
+        with self._lock:
+            if handler in self._subs[event]:
+                self._subs[event].remove(handler)
+        from core.debug import trace_bus_sub
+        trace_bus_sub(self, event, handler, "OFF")
 
     def emit(self, event: str, data: Any = None) -> None:
         """触发事件。handler 在当前线程同步执行。
         单个 handler 异常不会影响其他 handler。"""
-        for h in list(self._subs[event]):
+        with self._lock:
+            handlers = list(self._subs[event])
+        for h in handlers:
             try:
                 h(data)
             except Exception as e:
@@ -56,4 +66,10 @@ class EventBus:
 
     def clear(self) -> None:
         """清空所有订阅（切换剧本/重置时调用）。"""
-        self._subs.clear()
+        with self._lock:
+            self._subs.clear()
+
+    def subscription_count(self) -> dict:
+        """返回当前各事件类型的订阅数（调试用）。"""
+        with self._lock:
+            return {ev: len(hs) for ev, hs in self._subs.items() if hs}

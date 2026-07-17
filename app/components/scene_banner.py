@@ -21,6 +21,7 @@ class SceneBanner:
         self._text: ft.Text = None
         self._sub: ft.Text = None
         self._timer: threading.Timer = None
+        self._hide_timer: threading.Timer = None
         self.root = self._build()
 
     def _build(self) -> ft.Control:
@@ -87,6 +88,9 @@ class SceneBanner:
         if self._timer:
             self._timer.cancel()
             self._timer = None
+        if self._hide_timer:
+            self._hide_timer.cancel()
+            self._hide_timer = None
 
     def _hide(self):
         try:
@@ -107,4 +111,5 @@ class SceneBanner:
                 pass
         t = threading.Timer(0.35, _set_invisible)
         t.daemon = True
+        self._hide_timer = t
         t.start()

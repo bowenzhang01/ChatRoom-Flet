@@ -58,16 +58,16 @@ class AIEngine:
         """构建角色发言 prompt。"""
         char = self.app.characters.get(name, {})
         scene = self._get_scene_text()
-        recent = self.app.history[-8:] if self.app.history else []
+        recent = self.app.history_snapshot()[-8:] if self.app.history else []
         lines = []
         for m in recent:
             if m.get("type") == "director":
-                lines.append(f" [Director's note - incorporate this into the scene]: {m['text']}")
+                lines.append(f" (Director's note - incorporate this into the scene): {m['text']}")
             elif m.get("type") == "random_event":
-                lines.append(f" [Something happened in the environment]: {m['text']}")
+                lines.append(f" (Something happened in the environment): {m['text']}")
             elif m.get("type") == "random_npc":
                 npc_name = m.get("display_name", "路人")
-                lines.append(f"[Passerby {npc_name} says]: {m['text']}")
+                lines.append(f"(Passerby {npc_name} says): {m['text']}")
             else:
                 dname = m.get("display_name", m["name"])
                 lines.append(f"{dname}: {m['text']}")
@@ -145,7 +145,7 @@ class AIEngine:
             if self._api_error_count >= 3:
                 self._api_error_count = 0
                 return (f"*{name} 遇到了问题*", "api_error_stop:" + err_msg)
-            return (f"*{name} thought for a moment*", err_msg)
+            return (f"*{name} 想了想*", err_msg)
 
     # ═══ 动态发言人选择 ═══
 
@@ -239,8 +239,8 @@ class AIEngine:
     # ═══ 标签解析（[SCENE] / [NEXT]）═══
 
     def _parse_and_strip_scene_tag(self, text: str):
-        """解析并剥离 [SCENE]...[/SCENE] 标签。
-        返回 (clean_text, scene_dict_or_None)。"""
+        """解析并剥离所有 [SCENE]...[/SCENE] 标签。
+        返回 (clean_text, scene_dict_or_None)。取最后一个作为有效场景。"""
         scene_matches = list(re.finditer(r'\[SCENE\](.+?)\[/SCENE\]', text, re.DOTALL))
         if not scene_matches:
             return (text, None)
@@ -250,18 +250,21 @@ class AIEngine:
         if scene_content:
             scene_dict = self._parse_scene_content(scene_content)
             print(f"[scene] tag detected: {scene_content[:80]}...")
-        # 剥离标签及周围空白
-        start, end = m.start(), m.end()
-        while start > 0 and text[start - 1] in (' ', '\n', '\r', '\t'):
-            start -= 1
-        while end < len(text) and text[end] in (' ', '\n', '\r', '\t'):
-            end += 1
-        clean = text[:start] + text[end:]
+        # 剥离所有 [SCENE] 标签及周围空白（从后向前处理避免偏移）
+        clean = text
+        for m in reversed(scene_matches):
+            start, end = m.start(), m.end()
+            while start > 0 and clean[start - 1] in (' ', '\n', '\r', '\t'):
+                start -= 1
+            while end < len(clean) and clean[end] in (' ', '\n', '\r', '\t'):
+                end += 1
+            clean = clean[:start] + clean[end:]
         return (clean, scene_dict)
 
     def _parse_scene_content(self, content: str) -> dict:
-        """解析场景标签内容为 {time, location, scene} 字典。"""
-        m = re.match(r'^(.+?)。地点：(.+?)。(.+)$', content)
+        """解析场景标签内容为 {time, location, scene} 字典。
+        兼容全角/半角标点混合。"""
+        m = re.match(r'^(.+?)[。.]\s*地点[：:]\s*(.+?)[。.]\s*(.+)$', content)
         if m:
             return {
                 "time": m.group(1).strip(),
@@ -271,14 +274,14 @@ class AIEngine:
         return {"time": "", "location": "", "scene": content}
 
     def _parse_and_strip_next_tag(self, text: str):
-        """解析并剥离末尾的 [NEXT:Name] 标签。
+        """解析并剥离 [NEXT:Name] 标签。
+        取最后一个 [NEXT] 建议，剥离所有出现的标签。
         返回 (clean_text, next_name_or_None)。"""
-        next_match = re.search(r'\[NEXT:([^\]]+)\]', text)
-        if not next_match:
+        matches = re.findall(r'\[NEXT:([^\]]+)\]', text)
+        if not matches:
             return (text, None)
-        next_name = next_match.group(1).strip()
-        # 仅剥离位于末尾的 [NEXT]
-        clean = re.sub(r'\s*\[NEXT:[^\]]+\]\s*$', '', text).strip()
+        next_name = matches[-1].strip()
+        clean = re.sub(r'\s*\[NEXT:[^\]]+\]', '', text).strip()
         return (clean, next_name)
 
     # ═══ 随机事件 / NPC 引擎 ═══
@@ -479,7 +482,7 @@ class AIEngine:
 
     def build_chat_title_prompt(self) -> str:
         """构建对话标题生成 prompt。"""
-        recent = self.app.history[-6:] if len(self.app.history) >= 4 else self.app.history[:]
+        recent = self.app.history_snapshot()[-6:] if len(self.app.history) >= 4 else self.app.history_snapshot()
         lines = []
         for m in recent:
             name = m.get("display_name", m.get("name", "?"))

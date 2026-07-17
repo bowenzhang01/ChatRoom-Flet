@@ -91,6 +91,11 @@ def _make_ai_row(entry, state, max_width) -> ft.Control:
     text = entry.get("text", "")
     t = entry.get("time", "")
     style = state.char_styles.get(name, {}) if state else {}
+    if not style:
+        for v in state.char_styles.values():
+            if v.get("name") == dname:
+                style = v
+                break
     color = style.get("color") or entry.get("color") or "#888888"
     initial = (dname or name or "?")[0]
 

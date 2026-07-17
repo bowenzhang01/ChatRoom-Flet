@@ -210,8 +210,7 @@ class ChatView(ViewBase):
             pass
 
     def _build_empty_state(self) -> ft.Control:
-        profiles = self.state.data.get_profile_list()
-        folder = profiles[0] if profiles else ""
+        folder = config.app_config.get("active_profile", "")
         emoji = profile_emoji(folder, self.state.title)
         title = ft.Text(self.state.title, size=22, weight=ft.FontWeight.W_700, text_align=ft.TextAlign.CENTER)
         subtitle = ft.Text("对话尚未开始", size=13, color=ft.Colors.ON_SURFACE_VARIANT)
@@ -292,8 +291,7 @@ class ChatView(ViewBase):
         )
 
     def _rebuild_empty_state(self):
-        profiles = self.state.data.get_profile_list()
-        folder = profiles[0] if profiles else ""
+        folder = config.app_config.get("active_profile", "")
         emoji = profile_emoji(folder, self.state.title)
         if self._empty_emoji_text:
             self._empty_emoji_text.value = emoji
@@ -373,6 +371,7 @@ class ChatView(ViewBase):
     def _show_scene_dialog(self):
         scenes = self.state.scenes or []
         if not scenes:
+            self._snack("暂无场景，请先到剧本管理中添加场景")
             return
         controls = [
             ft.ListTile(
@@ -449,6 +448,18 @@ class ChatView(ViewBase):
             self._snack("没有对话内容可保存")
             return
         self._saving = True
+        # 超时兜底：30s 后强制复位，防止 AI 标题生成挂起导致按钮永久禁用
+        def _save_timeout():
+            import time as _t
+            _t.sleep(30)
+            if self._saving:
+                self._saving = False
+                if self._save_dialog:
+                    self._save_dialog.fail("保存超时，请重试")
+                    self._save_dialog = None
+                self._update_status("保存超时，请重试", self.state.running, self.state.paused)
+        import threading
+        threading.Thread(target=_save_timeout, daemon=True).start()
         # 即时反馈：禁用保存按钮 + 状态栏提示
         self._update_status("正在保存…", self.state.running, self.state.paused)
         # 显示保存进度对话框
@@ -480,8 +491,8 @@ class ChatView(ViewBase):
             title=ft.Text("停止对话"),
             content=ft.Text(f"当前对话有 {count} 条消息" + ("，部分未保存" if unsaved else "")),
             actions=[
-                ft.TextButton("保存并停止", on_click=lambda e: self._save_then_stop(do_stop)),
-                ft.FilledButton("直接停止", on_click=do_stop),
+                ft.FilledButton("保存并停止", on_click=lambda e: self._save_then_stop(do_stop)),
+                ft.TextButton("直接停止", on_click=do_stop),
                 ft.TextButton("取消", on_click=lambda e: self._close_dialog()),
             ],
         )
@@ -585,7 +596,7 @@ class ChatView(ViewBase):
         row.animate_offset = ft.Animation(250, ft.AnimationCurve.EASE_OUT)
         self._list_view.controls.append(row)
         if len(self._list_view.controls) > 300:
-            self._list_view.controls = self._list_view.controls[-300:]
+            del self._list_view.controls[:-300]
         self._has_msgs = True
         self._empty_state.visible = False
         self._push_update()
@@ -608,6 +619,7 @@ class ChatView(ViewBase):
 
     def _on_user_turn(self, _data):
         self._user_turn = True
+        self._transport.set_running(True, True)
         self._update_status("轮到你了～", self.state.running, True)
         self._director_input.refresh(self.state.director_mode, self.state.user_mode, True)
 
@@ -625,6 +637,7 @@ class ChatView(ViewBase):
             self._director_input.refresh(self.state.director_mode, self.state.user_mode, False)
         elif kind == "stopped":
             self._user_turn = False
+            self._saving = False
             self._transport.set_running(False, False)
             self._update_status("已停止", False, False)
             self._director_input.hide()
@@ -708,7 +721,7 @@ class ChatView(ViewBase):
     def _reload_history_into_list(self):
         """把 state.history 重灌进气泡列表。"""
         self._list_view.controls.clear()
-        for entry in self.state.history:
+        for entry in self.state.history_snapshot():
             row = make_bubble_row(entry, self.state, self._bubble_max_width())
             row.opacity = 1
             row.offset = ft.Offset(0, 0)
@@ -725,6 +738,8 @@ class ChatView(ViewBase):
 
     # ═══ 生命周期 ═══
     def on_enter(self):
+        from core.debug import trace, check_bus_leaks
+        trace("chat_view.on_enter")
         if not self._built:
             return
         # 如果在剧本编辑页加载了其他剧本，恢复活跃剧本数据
@@ -734,10 +749,15 @@ class ChatView(ViewBase):
             if current_folder != active:
                 saved_scene_idx = self.state.scene_idx
                 saved_current_scene = self.state.current_scene
+                saved_scene_version = self.state.scene_version
+                saved_last_scene_update_turn = self.state._last_scene_update_turn
                 self.state.data.load_profile(active)
                 self.state.scene_idx = saved_scene_idx
                 self.state.current_scene = saved_current_scene
+                self.state.scene_version = saved_scene_version
+                self.state._last_scene_update_turn = saved_last_scene_update_turn
         self._subscribe()
+        check_bus_leaks(self.state.bus, expected_event_count=len(self._handlers))
         self._refresh_header_menu()
         self._mode_chips.refresh()
         self._transport.refresh()
@@ -755,14 +775,24 @@ class ChatView(ViewBase):
             self.state.running, self.state.paused
         )
         self._update_count()
+        # 提示角色加载错误
+        errors = getattr(self.state, '_char_load_errors', None) or []
+        if errors:
+            self._snack(f"部分角色文件加载失败: {', '.join(errors)}")
+            self.state._char_load_errors = []
 
     def on_leave(self):
+        from core.debug import trace, check_bus_leaks
+        trace("chat_view.on_leave")
         # 离开聊天页时暂停对话（避免在别的页面继续消耗 API）
         if self.state.loop.running and not self.state.loop.paused:
             self.state.loop.pause()
+        # 取消场景横幅定时器，避免离开后幽灵淡出
+        self._scene_banner.cancel()
         # 标记为 dirty：返回时需重新同步
         self._dirty = True
         self._unsubscribe()
+        check_bus_leaks(self.state.bus)
         # 若保存进度对话框仍打开，关闭它（避免悬挂）
         if self._save_dialog:
             self._save_dialog.close()
