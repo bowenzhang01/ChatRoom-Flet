@@ -20,9 +20,11 @@ venv/
 .DS_Store
 Thumbs.db
 
-# 构建相关（本地使用，不上传）
+# 构建/开发记录（本地使用，不上传）
 BUILD_WINDOWS_NOTES.md
 build.ps1
+BUG_REPORT.md
+BUG_REPORT_2.md
 
 # IDE
 .vscode/

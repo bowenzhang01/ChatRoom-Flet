@@ -2,7 +2,7 @@
 
 > 多人 AI 角色扮演聊天应用 — 创建一个故事世界，让 AI 角色们自由对话，你可以扮演其中一个，也可以充当「导演」掌控全局。
 
-ChatRoom 的前身是 Kivy 桌面应用 [dorm-clean](https://github.com/bowenzhang01/Chatroom-Flet)，现已完全迁移至 **Flet** 框架，实现了：
+ChatRoom 的前身是 Kivy 桌面应用 [ChatRoom](https://github.com/bowenzhang01/ChatRoom)，现已完全迁移至 **Flet** 框架（详见 [IMPLEMENTATION_GUIDE.md](./IMPLEMENTATION_GUIDE.md)），实现了：
 
 - 🌐 **多平台支持** — Web / Windows / macOS / Linux / Android / iOS
 - 🎨 **九色光谱主题** — 九种渐变色主题覆盖全光谱，浅色/深色随意切换
@@ -15,62 +15,82 @@ ChatRoom 的前身是 Kivy 桌面应用 [dorm-clean](https://github.com/bowenzha
 
 ---
 
-## 📸 预览
-
-| 聊天视图 | 剧本管理 | 设置页面 |
-|:---:|:---:|:---:|
-| AI 角色实时对话 · 流式输出 · 场景切换 | 创建/编辑剧本 · AI 一键生成 | API 配置 · 主题切换 · 默认行为 |
-
 ## ✨ 核心功能
 
 ### 🤖 AI 角色扮演引擎
 
-- **三种发言模式**：轮流 (`round`) / 随机 (`random`) / 动态 (`dynamic`，加权选人，含沉默惩罚、[NEXT] 提示响应)
-- **导演模式** — 随时输入旁白/指令，注入到对话流中
-- **用户模式** — 化身为 `You` 角色，以第一人称参与角色们的对话
-- **动态场景** — AI 角色可以在回复中通过 `[SCENE]` 标签自动切换场景（时间/地点/氛围）
+- **三种发言模式**：
+  - `round` 轮流：按固定顺序依次发言
+  - `random` 随机：每次随机选人
+  - `dynamic` 动态：智能加权选人，含沉默惩罚（太久不说话概率↑）、直接点名（×3 权重）、[NEXT] 提示响应（×5 权重）、反自说自话（×0.1）
+- **导演模式** — 随时注入旁白/指令到对话流中，角色们会自然地回应你的编排
+- **用户模式** — 化身为剧本中的一个角色（`You`），和其他 AI 角色平等互动
+- **动态场景** — AI 角色通过 `[SCENE]` 标签自动切换场景，时间、地点、氛围均可随对话推进而变化
+- **发言速度可调** — 1-10 级速度滑块，控制角色发言间隔
 
 ### 🎲 随机事件 & 路人 NPC
 
-- 内置概率斜坡算法，对话中自动触发随机事件
-- 路人 NPC 可被角色提及后回应，互动 2-3 轮或沉默后自行离开
-- 参数内置默认值，开启即用
+对话不只是角色们在说话——世界也会发生意想不到的事情：
+
+- **随机事件**：内置概率斜坡算法（冷却期 3 轮 + 概率爬升至 35%），自动触发环境变化（暴雨、停电、敲门声…）
+- **路人 NPC**：随机生成临时路人角色，有名字、身份描述、独特性格
+- **NPC 互动**：角色提及 NPC → NPC 回应 2-3 轮后自然离开；4 轮无人提及则默默退场
+- **流式 NPC**：NPC 对话同样支持流式输出
+- 所有随机事件参数内置默认值，在剧本设置中一键开关即可
 
 ### ⚡ 流式输出
 
-- 角色发言逐 token 实时渲染
-- NPC 对话同样支持流式
-- 在设置中可随时开关
+- 角色发言通过 SSE (Server-Sent Events) 逐 token 实时渲染到聊天气泡
+- NPC 对话同样走流式通道
+- 设置中可随时关闭流式，切回一次性输出模式
 
-### 🎨 九色光谱主题
+### 📚 AI 一键创建剧本
 
-| 主题 | 渐变色带 |
-|:---|:---|
-| 🟣 **极光** Aurora | 青→蓝→靛→紫 |
-| 🌅 **暮光** Dusk | 粉→红→橙→琥珀→金黄 |
-| 🌾 **金穗** Golden | 金黄→暖橙 |
-| 🌿 **翠微** Jade | 青绿→翠绿→松绿 |
-| 🌊 **海天** Ocean | 琥珀→青柠→翠→天蓝 |
-| ☁️ **碧落** Sky | 天青→海蓝 |
-| 💗 **赤霞** Crimson | 赤红→玫红 |
-| 🌌 **星夜** Star | 蓝→靛→紫→粉 |
-| 🌈 **虹光** Rainbow | 全光谱（红橙黄绿青蓝紫）|
+输入一句话描述，AI 分四个阶段并行生成完整剧本：
 
-每种主题含完整的浅色 / 深色配色方案。
+| 阶段 | 内容 | 方式 |
+|:---|:---|:---|
+| **规划** | 世界观 + 标题 + 场景/角色提示 | 1 次 API 调用 |
+| **场景** | 4 个完整场景（时间/地点/氛围/描述） | 4 次并行 API 调用 |
+| **角色** | 4-5 个完整角色（人设/语气/外貌/系统提示） | 4-5 次并行 API 调用 |
+| **组装** | 用户化身 + 剧本标题优化 | 2 次并行 API 调用 |
 
-### 📚 剧本管理
+弹窗实时显示每个阶段的进度（如 `✓ 场景3/4 · ⏳ 角色2/5`），无需苦等。
 
-- 预设剧本：**女生寝室·日常** / **星际飞船**
-- **AI 一键创建** — 输入一句话描述，多阶段并行生成：世界设定 → 场景 → 角色 → 用户化身
-- 剧本详情：概览 / 场景 / 角色 / 发言顺序 / 随机事件开关
-- AI 辅助：补全角色 / 推断世界观 / 生成场景 / 生成角色
+除此之外还支持：
+- **AI 补全角色** — 对已有角色一键补全缺失字段
+- **AI 推断世界观** — 从标题和场景自动反推世界观
+- **AI 生成场景** — 根据已有角色和世界观扩充新场景
+- **AI 生成角色** — 根据场景和世界观生成新角色
+
+### 🗣️ 发言顺序与模式
+
+- **拖拽排序**：发言顺序通过拖拽列表自由调整
+- **待命角色**：角色可在「待命」与「参与」之间拖拽切换
+- **动态场景开关**：允许 AI 角色在发言中携带 `[SCENE]` 标签自动推进场景
+- **随机事件开关**：独立控制，不影响其他模式
 
 ### 💾 对话存档
 
-- 自动存档 + 手动保存
-- AI 自动生成对话标题
-- 按日期分组浏览
-- 启动时自动恢复未保存对话
+- **自动存档**：每次暂停和窗口关闭时自动保存，不丢一条消息
+- **启动恢复**：检测到未保存对话时弹出恢复提示
+- **AI 标题生成**：根据对话内容自动生成标题（如「深夜的寝室密谈」）
+- **按日期分组**：今天/昨天/更早，一目了然
+- **存档管理**：读取、删除、重命名
+
+### 🎨 主题系统
+
+九种渐变色主题，覆盖从赤红到紫罗兰的全光谱，每种包含完整的浅色/深色方案，在设置中随时切换：
+
+| 极光 · 青→紫 | 暮光 · 粉→金 | 金穗 · 金→橙 | 翠微 · 绿系 | 海天 · 琥珀→青 |
+|:---:|:---:|:---:|:---:|:---:|
+| 碧落 · 天蓝 | 赤霞 · 红→玫 | 星夜 · 蓝→紫 | 虹光 · 全光谱 | — |
+
+### 🔒 安全性
+
+- **API Key 环境变量优先**：`DEEPSEEK_API_KEY` / `OPENAI_API_KEY` 环境变量 > config.json，避免密钥泄露到 Git
+- **config.json 已 gitignore**：本地配置文件不会上传
+- 支持自定义 API 地址，兼容任何 OpenAI 接口兼容的服务
 
 ---
 
@@ -80,70 +100,46 @@ ChatRoom 的前身是 Kivy 桌面应用 [dorm-clean](https://github.com/bowenzha
 dorm-flet/
 ├── main.py                    # 入口脚本
 ├── config.py                  # 全局配置 & 路径常量
-├── config.example.json        # 配置文件模板
-├── utils.py                   # 纯工具函数（JSON、颜色等）
+├── utils.py                   # 纯工具（JSON/颜色/流解析）
 │
-├── core/                      # 业务层（零 UI 框架依赖）
-│   ├── app_state.py           # 应用全局状态中心
-│   ├── ai_engine.py           # AI 引擎（prompt 构建 & LLM 调用）
-│   ├── dialogue_loop.py       # 对话循环（后台线程）
-│   ├── chat_manager.py        # 对话存档管理
-│   ├── data_manager.py        # 剧本数据 CRUD
-│   ├── events.py              # 事件总线 (EventBus)
+├── core/                      # 业务层（零 UI 依赖，可独立复用）
+│   ├── app_state.py           # 全局状态中心
+│   ├── ai_engine.py           # AI 引擎（prompt 构建/LLM 调用/标签解析）
+│   ├── dialogue_loop.py       # 对话主循环（后台线程 + 流式管线）
+│   ├── chat_manager.py        # 存档管理（读写/自动存档/恢复）
+│   ├── data_manager.py        # 剧本 CRUD（角色/场景/配置）
+│   ├── events.py              # EventBus 事件总线
 │   └── debug.py               # 调试工具（DEBUG=dorm 启用）
 │
 ├── services/                  # 服务层
-│   ├── api_service.py         # LLM HTTP 封装（同步/异步/流式）
-│   └── path_resolver.py       # 平台路径抽象（打包兼容）
+│   ├── api_service.py         # LLM HTTP（同步/异步/SSE 流式）
+│   └── path_resolver.py       # 平台路径（开发/打包/移动端）
 │
 ├── app/                       # UI 层（Flet）
-│   ├── main_app.py            # 应用入口组装
-│   ├── theme.py               # 九色光谱主题
-│   ├── router.py              # 响应式导航路由
+│   ├── main_app.py            # 应用组装入口
+│   ├── theme.py               # 九色光谱主题（渐变/配色令牌）
+│   ├── router.py              # 响应式导航（桌面 Rail / 手机 NavBar）
 │   ├── state.py               # UI 反应式状态
-│   ├── views/                 # 视图
-│   │   ├── chat_view.py       # 主聊天页
-│   │   ├── profiles_view.py   # 剧本管理
+│   ├── views/                 # 四个主视图
+│   │   ├── chat_view.py       # 聊天（气泡/流式渲染/回底按钮）
+│   │   ├── profiles_view.py   # 剧本管理（卡片网格/详情/拖拽）
 │   │   ├── archives_view.py   # 对话存档
-│   │   └── settings_view.py   # 设置
+│   │   └── settings_view.py   # 设置（API/外观/行为/关于）
 │   └── components/            # 可复用组件
-│       ├── chat_bubble.py     # 消息气泡（流式渲染）
-│       ├── transport_bar.py   # 播放控制栏
-│       ├── mode_chips.py      # 模式选择 Chip 组
-│       ├── director_input.py  # 导演/用户输入栏
-│       ├── scene_banner.py    # 场景切换横幅
-│       ├── progress_dialog.py # 进度弹窗
-│       ├── profile_card.py    # 剧本封面卡
-│       ├── character_card.py  # 角色卡片
-│       └── reorderable_list.py # 拖拽排序列表
 │
-├── profiles/                  # 预设剧本数据
-│   ├── dorm_life/             # 女生寝室·日常
-│   └── starship/              # 星际飞船
+├── profiles/                  # 预设剧本
+│   ├── dorm_life/             # 女生寝室·日常（5 角色 + 4 场景）
+│   └── starship/              # 星际飞船（5 角色 + 5 场景）
 │
-├── assets/                    # 静态资源
-│   └── NotoSansSC-Regular.ttf # 中文字体
-│
-└── build.ps1                  # Windows 构建脚本（本地）
+└── assets/                    # 字体等静态资源
 ```
 
-### 设计原则
+### 设计特点
 
-- **core 层与 UI 层彻底解耦** — 业务逻辑不含任何 Flet/Kivy 引用，未来换框架零成本
-- **EventBus 驱动** — 后台线程通过事件总线通知 UI，替代轮询模型
-- **线程安全** — Flet 的 `page.update()` 跨线程安全，无需主线程调度
-
-### 数据流
-
-```
-用户操作 → UI 层 (app/)
-              ↓ 调用
-         core 层 (core/)
-              ↓ 事件
-         EventBus (core/events.py)
-              ↓ 通知
-         UI 层 更新控件
-```
+- **core ↔ UI 彻底解耦**：业务层不含任何 Flet/Kivy 引用，换 UI 框架零成本
+- **EventBus 事件驱动**：后台线程 emit 事件 → UI handler 更新控件，无轮询
+- **线程安全**：Flet `page.update()` 跨线程安全，事件回调直接更新 UI
+- **流式管线**：`msg → msg_delta(多次) → msg_end`，和非流式模式共用渲染逻辑
 
 ---
 
@@ -152,149 +148,110 @@ dorm-flet/
 ### 环境要求
 
 - Python 3.10+
-- DeepSeek API Key（或兼容 OpenAI 接口的其他服务）
+- DeepSeek API Key（或兼容 OpenAI 接口的其他 LLM 服务）
 
-### 1. 安装依赖
+### 1. 安装
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. 配置 API Key
-
-复制配置模板并填写：
+### 2. 配置
 
 ```bash
 cp config.example.json config.json
 ```
 
-编辑 `config.json`：
+编辑 `config.json`，填入 API Key：
 
 ```json
 {
   "model": {
-    "api_key": "sk-你的APIKey",
+    "api_key": "sk-你的Key",
     "api_base": "https://api.deepseek.com",
-    "model": "deepseek-v4-flash",
-    "temperature": 0.85,
-    "max_tokens": 500
+    "model": "deepseek-v4-flash"
   },
   "active_profile": "dorm_life"
 }
 ```
 
-> 💡 也可以通过环境变量 `DEEPSEEK_API_KEY` 或 `OPENAI_API_KEY` 配置 Key（优先级高于 config.json）
+> 💡 也可设置环境变量 `DEEPSEEK_API_KEY`，优先级高于配置文件，更安全。
 
 ### 3. 运行
 
-**Web 模式（推荐调试）：**
-
 ```bash
+# Web 模式（推荐开发调试）
 flet run main.py --web --port 8080
-```
 
-**桌面模式：**
-
-```bash
+# 桌面模式
 flet run main.py
 ```
 
 ### 调试模式
 
 ```bash
-# Windows PowerShell
+# Windows
 $env:DEBUG="dorm"; flet run main.py
 
-# Linux/macOS
+# Linux / macOS
 DEBUG=dorm flet run main.py
 ```
-
-启用后会输出详细的线程检查、状态校验、EventBus 订阅追踪等信息。
 
 ---
 
 ## 📦 构建发布
 
-Flet 支持一键构建多平台应用：
-
 ```bash
-# Web
-flet build web
-
-# Windows 桌面
-flet build windows
-
-# macOS
-flet build macos
-
-# Android
-flet build apk
-
-# iOS
-flet build ios
+flet build web      # Web 部署
+flet build windows  # Windows 桌面
+flet build macos    # macOS
+flet build apk      # Android
+flet build ios      # iOS
 ```
-
-> ⚠️ 首次构建前，请执行 `flet build <platform> --help` 检查平台前置依赖。
 
 ---
 
 ## 🎮 使用指南
 
-### 开始对话
+### 快速上手
 
-1. 在设置页配置 API Key（或设置环境变量）
-2. 切换到「聊天」页
-3. 选择剧本和场景
-4. 点击「▶ 开始对话」
+1. **设置 API Key** → 进入设置页，填写 API 地址和 Key，测试连接
+2. **选择剧本** → 内置「女生寝室·日常」和「星际飞船」两个预设剧本
+3. **开始对话** → 点击 ▶ 按钮，角色们开始自主对话
+4. **介入对话** → 开启导演模式发指令，或开启用户模式以角色身份加入
+5. **保存** → 对话自动存档，也可手动保存
 
-### 模式说明
+### AI 创建新剧本
 
-| 模式 | 开启/关闭 | 作用 |
-|:---|:---|:---|
-| **导演** | 随时切换 | 开启后在下方输入栏发送剧本指令 |
-| **用户** | 随时切换 | 开启后你将以「你」的身份参与对话 |
-| **动态场景** | 剧本设置中开启 | AI 角色可自动切换场景 |
-| **随机事件** | 剧本设置中开启 | 对话中自动触发意外事件或路人 NPC |
-
-### AI 一键创建剧本
-
-1. 进入「剧本」页
-2. 点击「✨ AI 创建」
-3. 输入一句话描述（如「魔法学院的新生日常」）
-4. AI 会依次完成：规划蓝图 → 生成场景 → 生成角色 → 组装完成
-5. 弹窗中可看到每一步的实时进度
+进入剧本页 → 点击「✨ AI 创建」 → 输入描述（如「赛博朋克酒吧的深夜」） → 等待多阶段生成完成即可开始新故事。
 
 ---
 
 ## 🛠️ 技术栈
 
-| 层级 | 技术 |
-|:---|:---|
-| UI 框架 | [Flet](https://flet.dev) (Flutter in Python) |
-| HTTP 客户端 | [httpx](https://www.python-httpx.org) |
-| AI 接口 | DeepSeek API (OpenAI 兼容) |
-| 字体 | Noto Sans SC |
-| 打包 | Flet build / PyInstaller |
+| 层级 | 技术 | 说明 |
+|:---|:---|:---|
+| UI | [Flet](https://flet.dev) | Flutter in Python |
+| 网络 | [httpx](https://www.python-httpx.org) | HTTP + SSE 流式 |
+| AI | DeepSeek API | OpenAI 兼容接口 |
+| 字体 | Noto Sans SC | 中文渲染 |
+| 打包 | Flet build | 多平台一键构建 |
 
 ---
 
-## 📝 开发历史
+## 📝 迁移历史
 
-本项目从 Kivy 桌面应用 `dorm-clean` 迁移而来，经历了以下里程碑：
+本项目从 Kivy 版 [ChatRoom](https://github.com/bowenzhang01/ChatRoom) 完全重写而来，迁移的技术细节和 UI 设计规格见 [IMPLEMENTATION_GUIDE.md](./IMPLEMENTATION_GUIDE.md)。
 
-- **Kivy 版** — 原始的桌面聊天应用
-- **Flet 迁移** — 完全重写 UI，core 层零依赖迁移
-- **流式输出** — 添加 SSE 流式渲染支持
-- **九色主题** — 从单一 Indigo 主题扩展为九色光谱
-- **多平台基础** — 添加 Web/移动端编译配置
-- **AI 生成重构** — 剧本生成从单次调用改为多阶段并行+进度追踪
+关键里程碑：
+- **Kivy → Flet 全量迁移** — UI 层完全重写，core 层零依赖保留
+- **EventBus 替代 Queue+Clock 轮询** — 更简洁的事件驱动架构
+- **流式输出** — SSE 逐 token 渲染，支持中途开关
+- **AI 生成重构** — 单次 API 调用 → 多阶段并行 + 进度追踪
+- **九色主题** — 单一 Indigo → 覆盖全光谱
 
 ---
 
 ## 📄 许可证
 
 MIT License
-
----
-
-*Built with ❤️ and AI*
