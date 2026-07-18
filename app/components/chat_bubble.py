@@ -9,11 +9,14 @@
   气泡 border_radius=16 四角统一，无尾巴。
 """
 
+import re
+
 import flet as ft
 
 from app.theme import RADIUS_BUBBLE, RADIUS_PILL
 
-__all__ = ["make_bubble_row", "make_scene_change_row", "make_random_event_row"]
+__all__ = ["make_bubble_row", "make_scene_change_row", "make_random_event_row",
+           "render_streaming_text", "strip_streaming_tags"]
 
 _TAG_TEXT = {"size": 10, "weight": ft.FontWeight.W_600}
 
@@ -27,16 +30,127 @@ def _tag(text: str, bg: str, color: str) -> ft.Control:
     )
 
 
-def _md(text: str, max_width: float) -> ft.Markdown:
-    return ft.Markdown(
-        value=text or "",
-        selectable=True,
-        extension_set=ft.MarkdownExtensionSet.GITHUB_FLAVORED,
-        soft_line_break=True,
-        shrink_wrap=True,
-        fit_content=True,
-        width=max_width,
-    )
+def _md(text: str, max_width: float) -> ft.Column:
+    return _render_bubble_text(text, max_width)
+
+
+def _render_bubble_text(text: str, max_width: float) -> ft.Column:
+    if not text:
+        return ft.Column(controls=[], tight=True)
+
+    collapsed = re.sub(r"\n{2,}", "\n", text)
+
+    pattern = re.compile(r"(?<!\*)\*([^*]+)\*(?!\*)")
+
+    segments = []
+    last_end = 0
+    for m in pattern.finditer(collapsed):
+        prefix = collapsed[last_end:m.start()].strip()
+        if prefix:
+            segments.append(("speech", prefix))
+        action = m.group(1).strip()
+        if action:
+            segments.append(("action", action))
+        last_end = m.end()
+
+    suffix = collapsed[last_end:].strip()
+    if suffix:
+        segments.append(("speech", suffix))
+
+    if not segments:
+        segments = [("speech", collapsed.strip())]
+
+    controls = []
+    for seg_type, seg_text in segments:
+        if seg_type == "action":
+            controls.append(ft.Text(
+                seg_text,
+                size=13,
+                italic=True,
+                color=ft.Colors.ON_SURFACE_VARIANT,
+                selectable=True,
+                width=max_width,
+            ))
+        else:
+            controls.append(ft.Markdown(
+                value=seg_text,
+                selectable=True,
+                extension_set=ft.MarkdownExtensionSet.GITHUB_FLAVORED,
+                soft_line_break=True,
+                shrink_wrap=True,
+                fit_content=True,
+                width=max_width,
+            ))
+
+    return ft.Column(controls=controls, tight=True, spacing=2)
+
+
+def strip_streaming_tags(text: str) -> str:
+    """流式中剥离末尾不完整的 [SCENE] 和 [NEXT] 标签。
+    角色对话不使用 [] 方括号，遇到 [SCENE 或 [NEXT: 即判定为标签。"""
+    # 剥离完整的 [SCENE]...[/SCENE]
+    text = re.sub(r'\s*\[SCENE\].*?\[/SCENE\]', '', text, flags=re.DOTALL)
+    # 剥离完整的 [NEXT:Name]
+    text = re.sub(r'\s*\[NEXT:[^\]]+\]', '', text)
+    # 剥离末尾不完整的 [SCENE] 片段（tag 已开头但未闭合）
+    text = re.sub(r'\s*\[SCENE\](?:(?!\[/SCENE\]).)*$', '', text, flags=re.DOTALL)
+    # 剥离末尾不完整的 [NEXT: 片段
+    text = re.sub(r'\s*\[NEXT:[^\]]*$', '', text)
+    return text.strip()
+
+
+def render_streaming_text(text: str, max_width: float) -> ft.Column:
+    """流式中的实时文本渲染。已闭合 *action* → dimmer italic，未闭合 * → 保持原文。"""
+    if not text:
+        return ft.Column(controls=[], tight=True)
+
+    collapsed = re.sub(r"\n{2,}", "\n", text)
+    cleaned = strip_streaming_tags(collapsed)
+
+    pattern = re.compile(r"(?<!\*)\*([^*]+)\*(?!\*)")
+
+    segments = []
+    last_end = 0
+    for m in pattern.finditer(cleaned):
+        prefix = cleaned[last_end:m.start()]
+        if prefix:
+            segments.append(("speech", prefix))
+        action = m.group(1).strip()
+        if action:
+            segments.append(("action", action))
+        last_end = m.end()
+
+    suffix = cleaned[last_end:]
+    if suffix:
+        segments.append(("speech", suffix))
+
+    if not segments:
+        segments = [("speech", cleaned)]
+
+    controls = []
+    for seg_type, seg_text in segments:
+        if seg_type == "action":
+            controls.append(ft.Text(
+                seg_text,
+                size=13,
+                italic=True,
+                color=ft.Colors.ON_SURFACE_VARIANT,
+                selectable=True,
+                width=max_width,
+            ))
+        else:
+            ctrl = ft.Markdown(
+                value=seg_text,
+                selectable=True,
+                extension_set=ft.MarkdownExtensionSet.GITHUB_FLAVORED,
+                soft_line_break=True,
+                shrink_wrap=True,
+                fit_content=True,
+                width=max_width,
+            )
+            controls.append(ctrl)
+
+    return ft.Column(controls=controls, tight=True, spacing=2)
 
 
 def _bubble(content: ft.Control, bgcolor: str, border=None) -> ft.Container:

@@ -1,10 +1,10 @@
 ﻿# -*- coding: utf-8 -*-
 """ChatRoom - Flet Edition · 聊天视图（主界面）
-  组合：Header(剧本名·场景▾) + ModeChips + 内容区(空状态/气泡列表)
-        + SceneBanner + TransportBar + DirectorInput + StatusBar
-  Step 3：骨架 + 空状态 + 模式 Chip + TransportBar + 状态栏
-  Step 4：气泡渲染 + EventBus 接入
-  Step 5：场景横幅 + 输入栏
+   组合：Header(剧本名·场景▾) + ModeChips + 内容区(空状态/气泡列表)
+         + SceneBanner + 回到底部按钮 + TransportBar(含状态) + DirectorInput
+   Step 3：骨架 + 空状态 + 模式 Chip + TransportBar + 状态栏
+   Step 4：气泡渲染 + EventBus 接入
+   Step 5：场景横幅 + 输入栏
 """
 
 import flet as ft
@@ -14,7 +14,7 @@ from app.views import ViewBase
 from app.theme import RADIUS_PILL, profile_emoji, char_color_at
 from app.components.mode_chips import ModeChips
 from app.components.transport_bar import TransportBar
-from app.components.chat_bubble import make_bubble_row, make_scene_change_row
+from app.components.chat_bubble import make_bubble_row, make_scene_change_row, render_streaming_text, _md
 from app.components.scene_banner import SceneBanner
 from app.components.director_input import DirectorInput
 from app.components.progress_dialog import ProgressDialog
@@ -50,11 +50,30 @@ class ChatView(ViewBase):
         self._empty_title: ft.Text = None
         self._empty_emoji_text: ft.Text = None
         self._empty_avatars: ft.Control = None
+        self._streaming_rows: dict = {}  # msg_id → ft.Row 映射
 
     # ═══ 构建视图 ═══
     def build(self) -> ft.Control:
         self._mode_chips = ModeChips(self.page, self.state, on_change=self._on_mode_change)
-        self._transport = TransportBar(self.page, self.state, on_action=self._on_transport_action)
+
+        # 状态指示器（合并到 TransportBar 中）
+        self._status_dot = ft.Container(
+            width=8, height=8, border_radius=4,
+            bgcolor=ft.Colors.OUTLINE,
+        )
+        self._status_text = ft.Text("就绪", size=12, color=ft.Colors.ON_SURFACE_VARIANT)
+        self._count_text = ft.Text("0 条", size=12, color=ft.Colors.ON_SURFACE_VARIANT)
+
+        self._transport = TransportBar(
+            self.page, self.state, on_action=self._on_transport_action,
+            extra_controls=[
+                ft.Container(width=8),
+                self._status_dot,
+                self._status_text,
+                ft.Container(width=8),
+                self._count_text,
+            ],
+        )
         self._scene_banner = SceneBanner(self.page)
         self._director_input = DirectorInput(self.page, self.state)
 
@@ -64,14 +83,34 @@ class ChatView(ViewBase):
         except RuntimeError:
             self._async_loop = None
 
+        self._to_bottom_btn = ft.Container(
+            content=ft.Row(
+                controls=[
+                    ft.IconButton(
+                        icon=ft.Icons.ARROW_DOWNWARD,
+                        icon_size=18,
+                        tooltip="回到底部",
+                        on_click=lambda e: self._scroll_to_bottom(),
+                        style=ft.ButtonStyle(
+                            bgcolor=ft.Colors.SURFACE_CONTAINER_HIGH,
+                            shape=ft.CircleBorder(),
+                        ),
+                    ),
+                ],
+                alignment=ft.MainAxisAlignment.CENTER,
+            ),
+            padding=ft.Padding.only(bottom=4, top=2),
+            visible=False,
+        )
+
         self._root = ft.Column(
             controls=[
                 self._build_header(),
                 self._mode_chips.root,
                 self._build_content(),
+                self._to_bottom_btn,
                 self._transport.root,
                 self._director_input.root,
-                self._build_status_bar(),
             ],
             spacing=0,
             expand=True,
@@ -206,6 +245,8 @@ class ChatView(ViewBase):
             max_ext = float(getattr(e, "max_scroll_extent", 0) or 0)
             self._near_bottom = (max_ext - pixels) < 120
             self._list_view.auto_scroll = self._near_bottom
+            if self._to_bottom_btn:
+                self._to_bottom_btn.visible = not self._near_bottom
         except Exception:
             pass
 
@@ -317,37 +358,6 @@ class ChatView(ViewBase):
             self.page.update()
         except Exception:
             pass
-
-    # ── 状态栏 ──
-    def _build_status_bar(self) -> ft.Control:
-        self._status_dot = ft.Container(
-            width=8, height=8, border_radius=4,
-            bgcolor=ft.Colors.OUTLINE,
-        )
-        self._status_text = ft.Text("就绪", size=12, color=ft.Colors.ON_SURFACE_VARIANT)
-        self._count_text = ft.Text("0 条", size=12, color=ft.Colors.ON_SURFACE_VARIANT)
-        to_bottom_btn = ft.IconButton(
-            icon=ft.Icons.ARROW_DOWNWARD,
-            icon_size=16,
-            tooltip="回到底部",
-            on_click=lambda e: self._scroll_to_bottom(),
-        )
-        return ft.Container(
-            content=ft.Row(
-                controls=[
-                    self._status_dot,
-                    self._status_text,
-                    ft.Container(width=8),
-                    self._count_text,
-                    ft.Container(expand=True),
-                    to_bottom_btn,
-                ],
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                spacing=4,
-            ),
-            padding=ft.Padding.symmetric(horizontal=16, vertical=6),
-            bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
-        )
 
     # ═══ 场景/剧本 ═══
     def _scene_label(self) -> str:
@@ -534,8 +544,9 @@ class ChatView(ViewBase):
         try:
             self._near_bottom = True
             self._list_view.auto_scroll = True
+            self._to_bottom_btn.visible = False
             self._list_view.scroll_to(offset=1_000_000, duration=200)
-            self._list_view.update()
+            self._push_update()
         except Exception:
             pass
 
@@ -546,6 +557,8 @@ class ChatView(ViewBase):
         bus = self.state.bus
         handlers = {
             "msg": self._on_msg,
+            "msg_delta": self._on_msg_delta,
+            "msg_end": self._on_msg_end,
             "random_event_msg": self._on_random_event,
             "random_npc_msg": self._on_npc,
             "set_status": self._on_set_status,
@@ -577,12 +590,63 @@ class ChatView(ViewBase):
 
     # ── 消息处理 ──
     def _on_msg(self, entry):
+        if entry.get("streaming"):
+            return self._on_streaming_start(entry)
         self._add_entry(entry)
+
+    def _on_streaming_start(self, entry):
+        """创建流式空白气泡，存入 _streaming_rows 以便后续更新。"""
+        row = make_bubble_row(entry, self.state, self._bubble_max_width())
+        self._add_bubble(row)
+        mid = entry.get("msg_id", "")
+        if mid:
+            self._streaming_rows[mid] = row
+
+    def _on_msg_delta(self, entry):
+        """流式增量：更新已有气泡的文本内容（无动画）。"""
+        mid = entry.get("msg_id", "")
+        row = self._streaming_rows.get(mid)
+        if row is None:
+            return
+        text = entry.get("text", "")
+        max_w = self._bubble_max_width()
+        new_content = render_streaming_text(text, max_w)
+        self._replace_bubble_content(row, new_content)
+        try:
+            self._push_update()
+        except Exception:
+            pass
+
+    def _on_msg_end(self, entry):
+        """流式结束：最终渲染（完整 action 解析），移除追踪。"""
+        mid = entry.get("msg_id", "")
+        row = self._streaming_rows.pop(mid, None)
+        if row is None:
+            return
+        text = entry.get("text", "")
+        max_w = self._bubble_max_width()
+        new_content = _md(text, max_w)
+        self._replace_bubble_content(row, new_content)
+        try:
+            self._push_update()
+        except Exception:
+            pass
+
+    def _replace_bubble_content(self, row: ft.Row, new_content: ft.Control):
+        """替换气泡 Row 内部的内容控件。"""
+        try:
+            inner_col = row.controls[1]  # ft.Column
+            bubble_container = inner_col.controls[1]  # ft.Container (bubble)
+            bubble_container.content = new_content
+        except (IndexError, AttributeError):
+            pass
 
     def _on_random_event(self, entry):
         self._add_entry(entry)
 
     def _on_npc(self, entry):
+        if entry.get("streaming"):
+            return self._on_streaming_start(entry)
         self._add_entry(entry)
 
     def _add_entry(self, entry):
@@ -659,7 +723,7 @@ class ChatView(ViewBase):
     def _on_saving(self):
         self._update_status("正在保存…", self.state.running, self.state.paused)
         if self._save_dialog:
-            self._save_dialog.set_step(1, "正在生成对话标题…")
+            self._save_dialog.set_step(1, "正在生成对话标题…", delay=0.1)
 
     def _on_saved(self, data: dict):
         self._saving = False
@@ -670,7 +734,7 @@ class ChatView(ViewBase):
         if self._save_dialog:
             if ok:
                 summary = f"保存成功：{title}" if title else "保存成功"
-                self._save_dialog.set_step(2, "完成")
+                self._save_dialog.set_step(2, "完成", delay=0.1)
                 self._save_dialog.complete(summary)
             else:
                 self._save_dialog.fail(msg)

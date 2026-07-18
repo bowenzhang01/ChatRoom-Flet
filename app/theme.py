@@ -1,12 +1,17 @@
 # -*- coding: utf-8 -*-
 """
-ChatRoom - Flet Edition · 四色光谱主题 (Spectrum Themes)
-  四种渐变色主题，在设置中随时切换：
-    虹光 Rainbow — 全光谱青绿→青→蓝→靛→紫→粉→琥珀→红
-    暮光 Dusk    — 紫红→橙黄 (粉→红→橙→琥珀→金)
-    海天 Ocean   — 橙黄→蓝绿 (琥珀→青柠→翠→青→天蓝)
-    星夜 Star    — 蓝紫→紫红 (蓝→靛→紫→粉)
-  同时保留浅色/深色切换（每主题两套配色）。
+ChatRoom - Flet Edition · 光谱主题 (Spectrum Themes)
+   九种渐变色主题覆盖完整光谱，在设置中随时切换：
+      赤霞 Crimson — 赤红→玫红 (红→玫瑰→粉)
+      暮光 Dusk    — 粉红→金黄 (粉→红→橙→琥珀→金黄)
+      金穗 Golden  — 金黄→暖橙 (金→琥珀→蜜橙)
+      翠微 Jade    — 青绿→翠绿 (青柠→绿→翠→松绿)
+      海天 Ocean   — 琥珀→天青 (琥珀→青柠→翠→青→天蓝)
+      碧落 Sky     — 天青→海蓝 (浅天蓝→天蓝→深天蓝→海蓝)
+      极光 Aurora  — 青蓝→紫 (青→蓝→靛→紫)
+      星夜 Star    — 蓝紫→玫粉 (蓝→靛→紫→粉)
+      虹光 Rainbow — 全光谱 (红→橙→黄→绿→青→蓝→紫)
+   同时保留浅色/深色切换（每主题两套配色）。
 """
 
 import flet as ft
@@ -67,7 +72,7 @@ SPACING = {
 
 
 # ═══════════════════════════════════════════════════════════════
-#  四色光谱主题定义
+#  九色光谱主题定义
 # ═══════════════════════════════════════════════════════════════
 
 COLOR_THEMES: dict[str, dict] = {}
@@ -287,6 +292,275 @@ COLOR_THEMES["star"] = {
     },
 }
 
+# ── 主题 5：赤霞 Crimson · 赤红→玫红 ──
+COLOR_THEMES["crimson"] = {
+    "name": "赤霞",
+    "seed_light": ft.Colors.RED,
+    "seed_dark": ft.Colors.PINK,
+    "gradient_band": [
+        "#DC2626",  # red
+        "#E11D48",  # rose
+        "#EC4899",  # pink
+        "#BE185D",  # deep pink
+    ],
+    "light": {
+        "surface": "#FFF5F5",
+        "primary": "#E11D48",
+        "on_primary": "#FFFFFF",
+        "primary_container": "#FFE4E6",
+        "on_primary_container": "#2D0008",
+        "bubble_ai": "#FFF0F0",
+        "bubble_ai_text": "#2D0008",
+        "director": "#FEF3C7",
+        "director_text": "#3D3520",
+        "director_accent": "#F59E0B",
+        "success": "#10B981",
+        "danger": "#DC2626",
+        "text": "#1A0A10",
+        "text_secondary": "#705860",
+        "text_hint": "#A09098",
+        "outline": "#E0D0D5",
+        "surface_container_low": "#FFF0F0",
+        "surface_container_high": "#FFE8E8",
+    },
+    "dark": {
+        "surface": "#1A0A10",
+        "primary": "#F43F5E",
+        "on_primary": "#1A0A10",
+        "primary_container": "#3D1A25",
+        "on_primary_container": "#FECDD3",
+        "bubble_ai": "#1F1216",
+        "bubble_ai_text": "#E8D0D5",
+        "director": "#3D3520",
+        "director_text": "#FCE7B0",
+        "director_accent": "#F59E0B",
+        "success": "#10B981",
+        "danger": "#F43F5E",
+        "text": "#E8D0D5",
+        "text_secondary": "#B098A0",
+        "text_hint": "#806870",
+        "outline": "#3D2530",
+        "surface_container_low": "#1F1216",
+        "surface_container_high": "#2A1A22",
+    },
+}
+
+# ── 主题 6：金穗 Golden · 金黄→暖橙 ──
+COLOR_THEMES["golden"] = {
+    "name": "金穗",
+    "seed_light": ft.Colors.AMBER,
+    "seed_dark": ft.Colors.YELLOW,
+    "gradient_band": [
+        "#FBBF24",  # yellow
+        "#F59E0B",  # amber
+        "#EA580C",  # orange
+        "#C2410C",  # deep orange
+    ],
+    "light": {
+        "surface": "#FFFDF0",
+        "primary": "#EAB308",
+        "on_primary": "#FFFFFF",
+        "primary_container": "#FEF9C3",
+        "on_primary_container": "#2D2000",
+        "bubble_ai": "#FFFBEB",
+        "bubble_ai_text": "#2D2000",
+        "director": "#FEF3C7",
+        "director_text": "#3D3520",
+        "director_accent": "#F59E0B",
+        "success": "#10B981",
+        "danger": "#F43F5E",
+        "text": "#1A1500",
+        "text_secondary": "#706830",
+        "text_hint": "#A09860",
+        "outline": "#E0D8B8",
+        "surface_container_low": "#FFFBEB",
+        "surface_container_high": "#FFF8E0",
+    },
+    "dark": {
+        "surface": "#1A1410",
+        "primary": "#FBBF24",
+        "on_primary": "#1A1410",
+        "primary_container": "#3D3020",
+        "on_primary_container": "#FEF9C3",
+        "bubble_ai": "#1F1A14",
+        "bubble_ai_text": "#E8E0C0",
+        "director": "#3D3520",
+        "director_text": "#FCE7B0",
+        "director_accent": "#F59E0B",
+        "success": "#10B981",
+        "danger": "#F43F5E",
+        "text": "#E8E0C0",
+        "text_secondary": "#B0A878",
+        "text_hint": "#807848",
+        "outline": "#3D3828",
+        "surface_container_low": "#1F1A14",
+        "surface_container_high": "#2A2418",
+    },
+}
+
+# ── 主题 7：翠微 Jade · 青绿→翠绿 ──
+COLOR_THEMES["jade"] = {
+    "name": "翠微",
+    "seed_light": ft.Colors.GREEN,
+    "seed_dark": ft.Colors.LIGHT_GREEN,
+    "gradient_band": [
+        "#84CC16",  # lime
+        "#22C55E",  # green
+        "#16A34A",  # forest
+        "#15803D",  # deep green
+        "#166534",  # pine
+    ],
+    "light": {
+        "surface": "#F0FDF4",
+        "primary": "#16A34A",
+        "on_primary": "#FFFFFF",
+        "primary_container": "#DCFCE7",
+        "on_primary_container": "#002A10",
+        "bubble_ai": "#EEF9F2",
+        "bubble_ai_text": "#002A10",
+        "director": "#FEF3C7",
+        "director_text": "#3D3520",
+        "director_accent": "#F59E0B",
+        "success": "#10B981",
+        "danger": "#F43F5E",
+        "text": "#001A08",
+        "text_secondary": "#5B7060",
+        "text_hint": "#8BA090",
+        "outline": "#C8DED0",
+        "surface_container_low": "#EEF9F2",
+        "surface_container_high": "#E2F5E8",
+    },
+    "dark": {
+        "surface": "#0F1A14",
+        "primary": "#4ADE80",
+        "on_primary": "#0F1A14",
+        "primary_container": "#1A3525",
+        "on_primary_container": "#DCFCE7",
+        "bubble_ai": "#142018",
+        "bubble_ai_text": "#D0E8D5",
+        "director": "#3D3520",
+        "director_text": "#FCE7B0",
+        "director_accent": "#F59E0B",
+        "success": "#10B981",
+        "danger": "#F43F5E",
+        "text": "#D0E8D5",
+        "text_secondary": "#90B098",
+        "text_hint": "#608068",
+        "outline": "#2A4030",
+        "surface_container_low": "#142018",
+        "surface_container_high": "#1E3028",
+    },
+}
+
+# ── 主题 8：碧落 Sky · 天青→海蓝 ──
+COLOR_THEMES["sky"] = {
+    "name": "碧落",
+    "seed_light": ft.Colors.CYAN,
+    "seed_dark": ft.Colors.BLUE,
+    "gradient_band": [
+        "#38BDF8",  # light sky
+        "#0EA5E9",  # sky blue
+        "#0284C7",  # deep sky
+        "#0369A1",  # ocean blue
+    ],
+    "light": {
+        "surface": "#F0F8FF",
+        "primary": "#0EA5E9",
+        "on_primary": "#FFFFFF",
+        "primary_container": "#E0F2FE",
+        "on_primary_container": "#002840",
+        "bubble_ai": "#EEF4FE",
+        "bubble_ai_text": "#002840",
+        "director": "#FEF3C7",
+        "director_text": "#3D3520",
+        "director_accent": "#F59E0B",
+        "success": "#10B981",
+        "danger": "#F43F5E",
+        "text": "#001528",
+        "text_secondary": "#5B6A78",
+        "text_hint": "#8B9AA5",
+        "outline": "#C8D5E0",
+        "surface_container_low": "#EEF4FE",
+        "surface_container_high": "#E2ECF8",
+    },
+    "dark": {
+        "surface": "#0F1820",
+        "primary": "#38BDF8",
+        "on_primary": "#0F1820",
+        "primary_container": "#1A2D3D",
+        "on_primary_container": "#E0F2FE",
+        "bubble_ai": "#141C24",
+        "bubble_ai_text": "#D0DEE8",
+        "director": "#3D3520",
+        "director_text": "#FCE7B0",
+        "director_accent": "#F59E0B",
+        "success": "#10B981",
+        "danger": "#F43F5E",
+        "text": "#D0DEE8",
+        "text_secondary": "#90A5B5",
+        "text_hint": "#607585",
+        "outline": "#2A3845",
+        "surface_container_low": "#141C24",
+        "surface_container_high": "#1E2832",
+    },
+}
+
+# ── 主题 9：虹光 Rainbow · 全光谱 ──
+COLOR_THEMES["rainbow"] = {
+    "name": "虹光",
+    "seed_light": ft.Colors.PINK,
+    "seed_dark": ft.Colors.DEEP_PURPLE,
+    "gradient_band": [
+        "#EF4444",  # red
+        "#F97316",  # orange
+        "#FBBF24",  # yellow
+        "#22C55E",  # green
+        "#06B6D4",  # cyan
+        "#3B82F6",  # blue
+        "#8B5CF6",  # violet
+    ],
+    "light": {
+        "surface": "#F8FAFB",
+        "primary": "#6366F1",
+        "on_primary": "#FFFFFF",
+        "primary_container": "#EEF0FF",
+        "on_primary_container": "#1A1A2E",
+        "bubble_ai": "#F4F5FA",
+        "bubble_ai_text": "#1A1A2E",
+        "director": "#FEF3C7",
+        "director_text": "#3D3520",
+        "director_accent": "#F59E0B",
+        "success": "#10B981",
+        "danger": "#F43F5E",
+        "text": "#1A1A2E",
+        "text_secondary": "#6B6B80",
+        "text_hint": "#9B9BA5",
+        "outline": "#D0D0E0",
+        "surface_container_low": "#F4F5FA",
+        "surface_container_high": "#E8EAF2",
+    },
+    "dark": {
+        "surface": "#12121A",
+        "primary": "#A78BFA",
+        "on_primary": "#12121A",
+        "primary_container": "#2A2A40",
+        "on_primary_container": "#E0DDFC",
+        "bubble_ai": "#1A1A24",
+        "bubble_ai_text": "#E0E0F0",
+        "director": "#3D3520",
+        "director_text": "#FCE7B0",
+        "director_accent": "#F59E0B",
+        "success": "#10B981",
+        "danger": "#F43F5E",
+        "text": "#E0E0F0",
+        "text_secondary": "#A0A0C0",
+        "text_hint": "#707090",
+        "outline": "#303045",
+        "surface_container_low": "#1A1A24",
+        "surface_container_high": "#242430",
+    },
+}
+
 # 映射中文名 → key
 THEME_NAMES = {v["name"]: k for k, v in COLOR_THEMES.items()}
 
@@ -439,7 +713,7 @@ _CARD_SHAPE = ft.RoundedRectangleBorder(radius=RADIUS_CARD)
 def build_theme(theme_key: str = "aurora", mode: str = "light") -> ft.Theme:
     """构建 Flet Theme。
 
-    theme_key: 'aurora' | 'dusk' | 'ocean' | 'star'
+    theme_key: 'crimson' | 'dusk' | 'golden' | 'jade' | 'ocean' | 'sky' | 'aurora' | 'star' | 'rainbow'
     mode: 'light' | 'dark'
     """
     ct = COLOR_THEMES.get(theme_key, COLOR_THEMES["aurora"])

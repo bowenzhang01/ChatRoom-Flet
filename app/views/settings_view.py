@@ -38,6 +38,7 @@ class SettingsView(ViewBase):
         self._random_sw: ft.Switch = None
         self._mode_dd: ft.Dropdown = None
         self._speed_dd: ft.Dropdown = None
+        self._streaming_sw: ft.Switch = None
         self._color_theme_dd: ft.Dropdown = None
 
     def build(self) -> ft.Control:
@@ -329,8 +330,12 @@ class SettingsView(ViewBase):
             dense=True, width=140,
             on_select=lambda e: self._save_default("default_speed", int(e.control.value)),
         )
+        self._streaming_sw = ft.Switch(label="流式输出", value=config.STREAMING_ENABLED)
+        self._streaming_sw.on_change = self._on_streaming_change
         return self._card("对话行为（当前剧本，立即生效）", [
             self._director_sw, self._user_sw, self._dynamic_sw, self._random_sw,
+            ft.Container(height=4),
+            self._streaming_sw,
             ft.Container(height=4),
             ft.Text("发言模式", size=12, color=ft.Colors.ON_SURFACE_VARIANT),
             self._mode_dd,
@@ -350,6 +355,15 @@ class SettingsView(ViewBase):
             self.state.speed = max(1, min(10, value))
         try:
             self.state.data._save_profile_config()
+        except Exception:
+            pass
+
+    def _on_streaming_change(self, e=None):
+        enabled = self._streaming_sw.value
+        config.app_config.setdefault("behavior", {})["streaming"] = enabled
+        config.STREAMING_ENABLED = enabled
+        try:
+            self.state.data._save_config()
         except Exception:
             pass
 
@@ -455,6 +469,8 @@ class SettingsView(ViewBase):
             self._mode_dd.value = self.state.mode if self.state.mode in ("round", "random", "dynamic") else "round"
         if self._speed_dd:
             self._speed_dd.value = str(self.state.speed)
+        if self._streaming_sw:
+            self._streaming_sw.value = config.STREAMING_ENABLED
         try:
             self.page.update()
         except Exception:

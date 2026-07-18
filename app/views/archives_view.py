@@ -72,7 +72,6 @@ class ArchivesView(ViewBase):
                 controls=[
                     ft.TextButton(
                         content=ft.Text("← 返回"),
-                        icon=ft.Icons.ARROW_BACK,
                         on_click=lambda e: self._back_to_list(),
                     ),
                     ft.Column(
@@ -400,7 +399,7 @@ class ArchivesView(ViewBase):
 
     def _on_saving(self, _data):
         if self._save_dialog:
-            self._save_dialog.set_step(1, "正在生成对话标题…")
+            self._save_dialog.set_step(1, "正在生成对话标题…", delay=0.1)
 
     def _on_saved(self, data: dict):
         ok = data.get("success", False) if isinstance(data, dict) else False
@@ -412,7 +411,7 @@ class ArchivesView(ViewBase):
                     "保存成功（延迟）" if self._save_timed_out else
                     (f"保存成功：{title}" if title else "保存成功")
                 )
-                self._save_dialog.set_step(2, "完成")
+                self._save_dialog.set_step(2, "完成", delay=0.1)
                 self._save_dialog.complete(summary, on_close=self._after_save_closed)
             else:
                 self._save_dialog.fail(msg)

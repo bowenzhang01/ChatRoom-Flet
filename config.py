@@ -6,14 +6,22 @@ ChatRoom - Flet Edition · 全局配置与路径常量
 """
 
 import os
+import sys as _sys
 from pathlib import Path
 
 from utils import load_json
 
 # ═══ 路径常量 ═══
-BASE_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
-PROFILES_DIR = BASE_DIR / "profiles"
-ASSETS_DIR = BASE_DIR / "assets"
+# 打包后(PyInstaller/serious-python)__file__不可靠,
+# 用 sys._MEIPASS 定位 bundled 资源
+if getattr(_sys, 'frozen', False):
+    _bundle_dir = Path(_sys._MEIPASS)
+else:
+    _bundle_dir = Path(os.path.dirname(os.path.abspath(__file__)))
+
+BASE_DIR = _bundle_dir
+PROFILES_DIR = _bundle_dir / "profiles"
+ASSETS_DIR = _bundle_dir / "assets"
 
 # ═══ 字体文件路径（供 Flet page.fonts 注册，不再用 Kivy LabelBase）═══
 FONT_SC_PATH = ASSETS_DIR / "NotoSansSC-Regular.ttf"
@@ -65,3 +73,7 @@ RANDOM_EVENT_DEFAULTS = {
     "max_probability": 0.35,
     "event_weight": 0.5,
 }
+
+# ═══ UI 行为配置 ═══
+BEHAVIOR = app_config.get("behavior", {})
+STREAMING_ENABLED = BEHAVIOR.get("streaming", True)  # 流式输出，默认开启

@@ -7,6 +7,7 @@ ChatRoom - Flet Edition · API 服务层
   （Flet 中 page.update() 跨线程安全，无需 Kivy Clock）。
 """
 
+import json
 import threading
 from typing import Callable, Optional
 
@@ -154,6 +155,121 @@ def call_chat_completion_async(
         try:
             result = call_chat_completion(
                 messages=messages,
+                model=model,
+                api_key=api_key,
+                api_base=api_base,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                timeout=timeout,
+            )
+            if on_result:
+                on_result(result)
+        except APIError as e:
+            if on_error:
+                on_error(str(e))
+        except Exception as e:
+            if on_error:
+                on_error(_parse_error(e))
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
+def call_chat_completion_stream(
+    messages: list,
+    on_token: Callable[[str], None],
+    model: str = None,
+    api_key: str = None,
+    api_base: str = None,
+    temperature: float = None,
+    max_tokens: int = None,
+    timeout: float = 60.0,
+) -> str:
+    """流式调用 LLM chat completion，逐 token 回调。
+
+    Returns: 累积完整的响应文本
+    Raises: APIError
+    """
+    if model is None:
+        model = config.MODEL
+    if api_key is None:
+        api_key = config.API_KEY
+    if api_base is None:
+        api_base = config.API_BASE
+    api_base = api_base.strip()
+    if temperature is None:
+        temperature = config.TEMPERATURE
+    if max_tokens is None:
+        max_tokens = config.MAX_TOKENS
+
+    if not api_key:
+        raise APIError("未配置 API Key")
+
+    url = f"{api_base}/chat/completions"
+    print(f"[api] SSE POST {url} | model={model} | timeout={timeout}s")
+    full_text = []
+
+    try:
+        with httpx.Client(timeout=timeout, verify=config.API_VERIFY_SSL,
+                          trust_env=config.API_TRUST_ENV) as client:
+            with client.stream(
+                "POST",
+                url,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                    "Accept": "text/event-stream",
+                },
+                json={
+                    "model": model,
+                    "messages": messages,
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                    "stream": True,
+                },
+            ) as response:
+                response.raise_for_status()
+                for line in response.iter_lines():
+                    if not line or not line.startswith("data: "):
+                        continue
+                    data_str = line[6:]
+                    if data_str.strip() == "[DONE]":
+                        break
+                    try:
+                        data = json.loads(data_str)
+                        delta = data.get("choices", [{}])[0].get("delta", {})
+                        token = delta.get("content", "")
+                        if token:
+                            full_text.append(token)
+                            on_token(token)
+                    except (json.JSONDecodeError, KeyError, IndexError):
+                        continue
+    except httpx.HTTPStatusError as e:
+        raise APIError(_parse_error(e), e.response.status_code)
+    except Exception as e:
+        raise APIError(_parse_error(e))
+
+    result = "".join(full_text).strip()
+    return result
+
+
+def call_chat_completion_stream_async(
+    messages: list,
+    on_token: Callable[[str], None],
+    on_result: Callable[[str], None] = None,
+    on_error: Callable[[str], None] = None,
+    model: str = None,
+    api_key: str = None,
+    api_base: str = None,
+    temperature: float = None,
+    max_tokens: int = None,
+    timeout: float = 60.0,
+):
+    """后台线程流式调用 LLM。每 token 回调 on_token，完成时回调 on_result。"""
+    def _run():
+        try:
+            result = call_chat_completion_stream(
+                messages=messages,
+                on_token=on_token,
                 model=model,
                 api_key=api_key,
                 api_base=api_base,

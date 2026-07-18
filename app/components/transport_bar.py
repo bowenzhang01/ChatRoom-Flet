@@ -20,10 +20,11 @@ _MODES = [
 class TransportBar:
     """对话控制工具条。on_action(action) 回调通知外部（如弹停止确认）。"""
 
-    def __init__(self, page: ft.Page, state, on_action=None):
+    def __init__(self, page: ft.Page, state, on_action=None, extra_controls=None):
         self.page = page
         self.state = state
         self.on_action = on_action  # action: "start"|"pause"|"resume"|"stop"|"save"
+        self._extra_controls = extra_controls or []
         self._mode_dd: ft.Dropdown = None
         self._speed_slider: ft.Slider = None
         self._play_btn: ft.IconButton = None
@@ -67,15 +68,15 @@ class TransportBar:
             visible=False,
         )
 
+        controls = [self._mode_dd] + self._extra_controls + [
+            ft.Container(expand=True),
+            self._play_btn,
+            self._stop_btn,
+            self._save_btn,
+        ]
         return ft.Container(
             content=ft.Row(
-                controls=[
-                    self._mode_dd,
-                    ft.Container(expand=True),
-                    self._play_btn,
-                    self._stop_btn,
-                    self._save_btn,
-                ],
+                controls=controls,
                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 spacing=8,

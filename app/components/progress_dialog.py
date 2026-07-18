@@ -7,8 +7,10 @@
   ProgressBar 策略：
   - 单次 API 调用（无法细粒度跟踪）→ 不确定模式（value=None，自动动画）
   - 多步操作 → 确定模式（value=0..1），每步更新
-  - 完成时 → value=1.0 + ✓ 图标，停留 1.2s 后自动关闭（或用户点关闭）
+   - 完成时 → value=1.0 + ✓ 图标，显示关闭按钮供用户手动关闭
 """
+
+import asyncio
 
 import flet as ft
 
@@ -47,6 +49,11 @@ class ProgressDialog:
         self._close_btn: ft.TextButton = None
         self._on_close_cb = None
         self._closed = False
+        self._async_loop = None
+        try:
+            self._async_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            pass
 
     def show(self, status: str = "正在处理…", steps: list = None,
              indeterminate: bool = True, dismissible: bool = False):
@@ -107,15 +114,36 @@ class ProgressDialog:
             self._progress.value = max(0.0, min(1.0, value))
             self._safe_update()
 
-    def set_step(self, step_idx: int, status: str = None):
+    def set_progress_fraction(self, done: int, total: int, status: str = None):
+        """以分数形式显示进度：更新状态文本 + 确定进度条。
+
+        Args:
+            done: 已完成数
+            total: 总数
+            status: 状态文本前缀（如"正在生成"），自动追加 (done/total)
+        """
+        if self._closed:
+            return
+        if self._progress:
+            self._progress.value = None if total == 0 else done / total
+        if status:
+            self.set_status(f"{status} ({done}/{total})")
+        else:
+            self._safe_update()
+
+    def set_step(self, step_idx: int, status: str = None, delay: float = 0.0):
         """标记某个步骤为已完成（打勾），并可选更新状态文本。
 
         Args:
             step_idx: 步骤索引（0-based）；当前步骤会显示为进行中
             status: 可选的新状态文本
+            delay: 可选延迟（秒），用于让步骤过渡可见；仅在非主线程调用时有意义
         """
         if self._closed:
             return
+        if delay > 0:
+            import time as _time
+            _time.sleep(delay)
         for i, row in enumerate(self._step_controls):
             icon = row.controls[0]
             if i < step_idx:
@@ -132,7 +160,7 @@ class ProgressDialog:
         else:
             self._safe_update()
 
-    def complete(self, summary: str, on_close=None, auto_close_ms: int = 1200):
+    def complete(self, summary: str, on_close=None, auto_close_ms: int = 0):
         """标记完成：进度条满 + 全部打勾 + 显示关闭按钮。
 
         Args:
@@ -204,6 +232,9 @@ class ProgressDialog:
 
     def _safe_update(self):
         try:
-            self.page.update()
+            if self._async_loop and self._async_loop.is_running():
+                self._async_loop.call_soon_threadsafe(self.page.update)
+            else:
+                self.page.update()
         except Exception:
             pass

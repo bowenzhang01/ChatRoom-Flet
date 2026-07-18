@@ -23,7 +23,7 @@ import random
 import re
 from datetime import datetime
 
-from services.api_service import call_chat_completion, APIError
+from services.api_service import call_chat_completion, call_chat_completion_stream, APIError
 from utils import extract_json
 import config
 
@@ -142,6 +142,32 @@ class AIEngine:
             self._api_error_count += 1
             err_msg = str(e)
             print(f"[ai_engine] LLM 错误 ({self._api_error_count}/3): {err_msg}")
+            if self._api_error_count >= 3:
+                self._api_error_count = 0
+                return (f"*{name} 遇到了问题*", "api_error_stop:" + err_msg)
+            return (f"*{name} 想了想*", err_msg)
+
+    def _call_llm_stream(self, name: str, on_token):
+        """流式调 LLM。返回 (text, error_or_None)，与 _call_llm 签名一致。
+        流式过程中的每个 token 会立即回调 on_token(token_str)。"""
+        char = self.app.characters.get(name)
+        if not char:
+            return ("...", "角色不存在")
+        prompt = self._build_prompt(name)
+        try:
+            content = call_chat_completion_stream(
+                messages=[
+                    {"role": "system", "content": char["system_prompt"]},
+                    {"role": "user", "content": prompt},
+                ],
+                on_token=on_token,
+            )
+            self._api_error_count = 0
+            return (content, None)
+        except APIError as e:
+            self._api_error_count += 1
+            err_msg = str(e)
+            print(f"[ai_engine] LLM 流式错误 ({self._api_error_count}/3): {err_msg}")
             if self._api_error_count >= 3:
                 self._api_error_count = 0
                 return (f"*{name} 遇到了问题*", "api_error_stop:" + err_msg)
@@ -348,7 +374,7 @@ class AIEngine:
             f'NPC: {{"type":"npc","name":"...","desc":"...","dialogue":"..."}}'
         )
 
-    def _build_npc_response_prompt(self) -> str:
+    def _build_npc_response_prompt(self, is_intro: bool = False) -> str:
         npc = self.app._active_npc or {}
         npc_name = npc.get("name", "路人")
         npc_desc = npc.get("desc", "一个经过的路人")
@@ -362,12 +388,21 @@ class AIEngine:
             lines.append(f"{dname}: {m['text']}")
         dialogue = "\n\n".join(lines) if lines else "(无人发言)"
 
+        if is_intro:
+            return (
+                f"{scene}\n\n"
+                f"[Recent]\n{dialogue}\n\n"
+                f"[Your turn - {npc_name}]\n"
+                f"你是一个路人: {npc_desc}。你刚刚路过这里，注意到在场的角色们。"
+                f"用一句自然的开场白（20-40字）加入场景，用「」包裹对话，用*星号*描述动作和表情。"
+                f"不要抢戏，打完招呼就可以退到一边。"
+            )
         return (
             f"{scene}\n\n"
             f"[Recent]\n{dialogue}\n\n"
             f"[Your turn - {npc_name}]\n"
             f"你是一个路人: {npc_desc}。"
-            f"自然地回应在场角色的对话。回复简短自然，50-100字。用*星号*描述动作和表情。"
+            f"自然地回应在场角色的对话。回复简短自然，50-100字。用「」包裹对话，用*星号*描述动作和表情。"
             f"不要抢戏，说完你的事就可以准备离开了。"
         )
 
@@ -407,7 +442,7 @@ class AIEngine:
                     {"role": "system", "content": (
                         f"你正在扮演一个临时路人角色：\"{npc_name}\"。"
                         f"{npc.get('desc', '一个路过的行人')}。"
-                        f"自然地回应在场角色。回复简短自然，50-100字。用*星号*描述动作和表情。"
+                        f"自然地回应在场角色。回复简短自然，50-100字。用「」包裹对话，用*星号*描述动作和表情。"
                     )},
                     {"role": "user", "content": prompt},
                 ],
@@ -417,6 +452,54 @@ class AIEngine:
         except APIError as e:
             print(f"[random_npc] API error: {e}")
             return f"*{npc_name} 摆了摆手*"
+
+    def _generate_npc_response_stream(self, on_token):
+        """流式生成路人 NPC 回应。返回文本或占位。"""
+        npc = self.app._active_npc or {}
+        npc_name = npc.get("name", "路人")
+        print(f"[random_npc] generating streaming response for '{npc_name}'...")
+        prompt = self._build_npc_response_prompt()
+        try:
+            content = call_chat_completion_stream(
+                messages=[
+                    {"role": "system", "content": (
+                        f"你正在扮演一个临时路人角色：\"{npc_name}\"。"
+                        f"{npc.get('desc', '一个路过的行人')}。"
+                        f"自然地回应在场角色。回复简短自然，50-100字。用「」包裹对话，用*星号*描述动作和表情。"
+                    )},
+                    {"role": "user", "content": prompt},
+                ],
+                on_token=on_token,
+            )
+            print(f"[random_npc] '{npc_name}' streaming response: {content[:80]}...")
+            return content
+        except APIError as e:
+            print(f"[random_npc] API streaming error: {e}")
+            return f"*{npc_name} 摆了摆手*"
+
+    def _generate_npc_intro_stream(self, on_token):
+        """流式生成路人 NPC 登场开场白。返回文本或占位。"""
+        npc = self.app._active_npc or {}
+        npc_name = npc.get("name", "路人")
+        print(f"[random_npc] generating streaming intro for '{npc_name}'...")
+        prompt = self._build_npc_response_prompt(is_intro=True)
+        try:
+            content = call_chat_completion_stream(
+                messages=[
+                    {"role": "system", "content": (
+                        f"你正在扮演一个临时路人角色：\"{npc_name}\"。"
+                        f"{npc.get('desc', '一个路过的行人')}。"
+                        f"用一句自然的开场白加入场景。用「」包裹对话，用*星号*描述动作和表情。"
+                    )},
+                    {"role": "user", "content": prompt},
+                ],
+                on_token=on_token,
+            )
+            print(f"[random_npc] '{npc_name}' streaming intro: {content[:80]}...")
+            return content
+        except APIError as e:
+            print(f"[random_npc] API streaming intro error: {e}")
+            return f"*{npc_name} 走了过来*"
 
     # ═══ 时间场景生成（scene_idx == -1 时调用）═══
 
@@ -495,7 +578,318 @@ class AIEngine:
             f"返回纯JSON：{{\"title\":\"标题\"}}"
         )
 
-    # ═══ AI 一键创建剧本 ═══
+    # ═══ AI 一键创建剧本（新版：规划 + 并行展开，真实进度）═══
+
+    def build_planning_prompt(self, description: str) -> str:
+        """Phase 1: 生成蓝图规划——返回 world + scene hints + character hints。"""
+        return (
+            "你是一个 RPG 剧本规划师。根据用户的一句话描述，生成剧本蓝图。\n\n"
+            f"用户描述：{description}\n\n"
+            "请返回 JSON（完整，不要省略）：\n"
+            "- world: 世界观描述，50-150字\n"
+            "- title: 剧本标题，5-15字\n"
+            "- scenes: 4 个场景的一句话提示，每个 10-25 字。场景提示互不相同\n"
+            '- characters: 4-5 个角色的提示（每个含 name 和 hint），hint 每个 10-25 字。角色名互不相同，不要出现 "You"\n'
+            "- you_hint: You 角色的身份描述，10-25 字\n\n"
+            '返回格式：{{"world":"...","title":"...","scenes":["...","..."],"characters":[{{"name":"...","hint":"..."}},...],"you_hint":"..."}}\n'
+            "只返回 JSON，不要其他文字。"
+        )
+
+    def build_single_scene_prompt(self, hint: str, world: str) -> str:
+        """根据一个提示 + 世界观，生成一个完整的场景。"""
+        world_line = f"【世界观】\n{world}\n\n" if world else ""
+        return (
+            f"{world_line}"
+            f"你是一个场景设计师。根据提示创建一个完整的场景。\n\n"
+            f"【场景提示】\n{hint}\n\n"
+            f"请生成以下字段：\n"
+            f"- time: 时间段名称，2-6 字（如「清晨」「深夜」）\n"
+            f"- location: 地点名称，2-6 字\n"
+            f"- mood: 氛围标签，2-4 字\n"
+            f"- scene: 场景描述，80-150 字，像小说段落。必须包含光线、声音、气味中的至少两种感官描写\n\n"
+            f"返回纯 JSON：{{\"time\":\"...\",\"location\":\"...\",\"mood\":\"...\",\"scene\":\"...\"}}\n"
+            f"只返回 JSON，不要其他文字。"
+        )
+
+    def build_single_character_prompt(self, name: str, hint: str, world: str) -> str:
+        """根据角色名、提示 + 世界观，生成一个完整的角色。"""
+        world_line = f"【世界观】\n{world}\n\n" if world else ""
+        return (
+            f"{world_line}"
+            f"你是一个角色设计师。根据提示创建一个完整的角色。\n\n"
+            f"【角色提示】\n名字：{name}，描述：{hint}\n\n"
+            f"请生成以下字段：\n"
+            f"- name: 英文名，首字母大写，2-5 字母（使用提示中的名字，可微调）\n"
+            f"- display_name: 中文显示名，2-3 字\n"
+            f"- color: 主题色 hex（#RRGGBB 格式），根据性格选柔和色调\n"
+            f"- bg_color: 背景色 hex，必须比 color 浅很多\n"
+            f"- personality: 性格标签，2-4 字\n"
+            f"- description: 外貌+身份描述，20-40 字。包含发色发型、眼睛、肤色、身材等\n"
+            f"- system_prompt: 完整角色人设，按以下结构：\n"
+            f"  1. 外在形象：外貌、穿着\n"
+            f"  2. 性格：核心性格 + 展开描述\n"
+            f"  3. 语气风格：说话方式、常用语气词\n"
+            f"  4. 表达方式：对话用直角引号「」包裹，动作用*星号*包裹。给出示例\n"
+            f"  5. 背景：所处环境/世界，与其他角色的关系\n"
+            f"  6. 规则：回复 100-200 字、描述动作表情、延续话题\n"
+            f"system_prompt 必须是单行字符串，换行用 \\\\n。\n\n"
+            f"文本中如需引用、强调、书名，一律用中文引号「」，绝对不要用英文双引号\"。\n"
+            f'返回纯 JSON：{{"name":"...","display_name":"...","color":"...","bg_color":"...","personality":"...","description":"...","system_prompt":"..."}}\n'
+            f"只返回 JSON，不要其他文字。"
+        )
+
+    def build_you_prompt(self, hint: str, world: str) -> str:
+        """生成 You（用户化身）角色的提示词。"""
+        world_line = f"【世界观】\n{world}\n\n" if world else ""
+        return (
+            f"{world_line}"
+            f"你是一个角色设计师。为用户角色（You）创建设定。\n\n"
+            f"【角色提示】\n{hint}\n\n"
+            f"You 是用户在这个世界中的化身——一个有具体身份的角色，不是旁观者。\n"
+            f"让用户通过它真正融入这个世界。\n\n"
+            f"请生成：\n"
+            f"- display_name: 中文显示名，默认「你」，身份特殊可调整，3 字以内\n"
+            f"- color: 主题色 hex，推荐蓝色系如 #42a5f5\n"
+            f"- bg_color: 背景色 hex，极浅，如 #f0f7ff\n"
+            f"- personality: 性格标签，2-4 字\n"
+            f"- description: 身份/外貌简述，15-30 字\n"
+            f"- system_prompt: 角色人设：身份定位 + 语气风格 + 表达方式（对话用「」，动作用*星号*）+ 规则（100-200 字）\n"
+            f"system_prompt 必须单行，换行用 \\\\n。\n"
+            f"文本中如需引用或强调，一律用中文引号「」，绝对不要用英文双引号\"。\n\n"
+            f'返回纯 JSON：{{"display_name":"你","color":"#42a5f5","bg_color":"#f0f7ff","personality":"...","description":"...","system_prompt":"..."}}\n'
+            f"只返回 JSON，不要其他文字。"
+        )
+
+    def generate_profile_batch_async(self, description: str,
+                                       on_plan_ready, on_phase_progress,
+                                       on_all_done, on_error):
+        """多阶段剧本生成，每阶段提供真实进度回调。
+
+        流程：
+            Phase 0 (planning): 1 次 API → blueprint JSON
+            Phase 2 (scenes):   顺序分派 N 个场景 API，完一个报一次进度
+            Phase 3 (chars):    顺序分派 M 个角色 API，完一个报一次进度
+            Phase 4 (writing):  You + 设置 API → on_all_done
+
+        Args:
+            description: 用户描述
+            on_plan_ready(blueprint): planning 完成时回调，传入蓝图
+            on_phase_progress(phase, task_name, phase_done, phase_total, step_idx):
+                phase: "scene" | "char" | "writing"
+                step_idx: 对应步骤索引 (2=场景, 3=角色, 4=写入)
+            on_all_done(results, errors): 全部完成时回调
+            on_error(msg): planning 失败时回调
+        """
+        import threading
+        import time as _time
+        from services.api_service import call_chat_completion_async
+
+        if not config.API_KEY:
+            if on_error:
+                on_error("未配置 API Key")
+            return
+
+        # ── Phase 0: Planning ──
+        plan_prompt = self.build_planning_prompt(description)
+
+        def _on_plan_result(content):
+            blueprint, err = extract_json(content)
+            if not blueprint:
+                if on_error:
+                    on_error(f"蓝图解析失败: {err}")
+                return
+            scenes_hints = blueprint.get("scenes", [])
+            chars_hints = blueprint.get("characters", [])
+            world = blueprint.get("world", "")
+            title = blueprint.get("title", description)
+            you_hint = blueprint.get("you_hint", "你自己")
+            if not world:
+                world = "一个温馨的日常世界"
+            if not scenes_hints:
+                scenes_hints = ["清晨日常", "午后时光", "傍晚散步", "深夜闲聊"]
+            if len(scenes_hints) < 2:
+                scenes_hints = (list(scenes_hints) + ["午后时光", "傍晚散步", "深夜闲聊"])[:4]
+
+            world = world.replace('"', '\u201c').replace('"', '\u201d')
+
+            on_plan_ready(blueprint)
+
+            # ── Shared state ──
+            results = {
+                "world": world,
+                "title": title,
+                "scenes": [None] * len(scenes_hints),
+                "characters": {},
+                "you": None,
+                "app": {"title": title},
+            }
+            errors = []
+            _lock = threading.Lock()
+            STAGGER_MS = 0.35
+
+            # ── Phase runner helper ──
+            def _run_phase(tasks, phase_name, step_idx, on_done):
+                """Dispatch tasks with stagger. Each completion calls
+                on_phase_progress. When all done, calls on_done()."""
+                total = len(tasks)
+                done_count = [0]
+                called = [False]
+
+                def _bump(task_name):
+                    with _lock:
+                        done_count[0] += 1
+                        d = done_count[0]
+                        if d >= total and not called[0]:
+                            called[0] = True
+                            fire = True
+                        else:
+                            fire = False
+                    on_phase_progress(phase_name, task_name, d, total, step_idx)
+                    if fire and on_done:
+                        on_done()
+
+                _time.sleep(STAGGER_MS)  # small gap between phases
+                for i, (prompt, result_cb, mt) in enumerate(tasks):
+                    _time.sleep(STAGGER_MS)
+                    task_label = f"{phase_name}_{i}"
+                    def _wrap(content, rc=result_cb, tn=task_label):
+                        rc(content)
+                        _bump(tn)
+                    call_chat_completion_async(
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=0.85,
+                        max_tokens=mt,
+                        timeout=45.0,
+                        on_result=_wrap,
+                        on_error=lambda err, rc=result_cb, tn=task_label: _wrap(""),
+                    )
+
+            # ── Build task lists ──
+
+            # Scene tasks
+            scene_tasks = []
+            for idx, hint in enumerate(scenes_hints):
+                def _mk_scene_cb(i):
+                    def _cb(content):
+                        data, parse_err = extract_json(content)
+                        if data and isinstance(data, dict) and data.get("time"):
+                            with _lock:
+                                results["scenes"][i] = data
+                        else:
+                            with _lock:
+                                errors.append(f"场景{i + 1}")
+                    return _cb
+                sp = self.build_single_scene_prompt(hint, world)
+                scene_tasks.append((sp, _mk_scene_cb(idx), 800))
+
+            # Character tasks
+            char_tasks = []
+            for ch in chars_hints:
+                cname = ch.get("name", "?")
+                ch_hint = ch.get("hint", cname)
+                def _mk_char_cb(n):
+                    def _cb(content):
+                        data, parse_err = extract_json(content)
+                        if data and isinstance(data, dict) and data.get("display_name"):
+                            with _lock:
+                                results["characters"][n] = data
+                        else:
+                            with _lock:
+                                errors.append(f"角色{n}")
+                    return _cb
+                cp = self.build_single_character_prompt(cname, ch_hint, world)
+                char_tasks.append((cp, _mk_char_cb(cname), 1500))
+
+            # Writing tasks (You + App)
+            def _cb_you(content):
+                data, parse_err = extract_json(content)
+                if data and isinstance(data, dict):
+                    data["name"] = "You"
+                    if not data.get("display_name"):
+                        data["display_name"] = "你"
+                    with _lock:
+                        results["you"] = data
+                else:
+                    with _lock:
+                        results["you"] = {
+                            "name": "You", "display_name": "你",
+                            "color": "#42a5f5", "bg_color": "#f0f7ff",
+                            "personality": "你自己",
+                            "description": "在这个世界中，你就是你。",
+                            "system_prompt": "你是这个世界的参与者。对话用直角引号「」包裹，动作用*星号*包裹。\n自然地和大家互动，回应他人的话题。\n回复简短自然，100-200字，要有画面感。",
+                        }
+
+            def _cb_app(content):
+                data, parse_err = extract_json(content)
+                if data and isinstance(data, dict) and data.get("title"):
+                    with _lock:
+                        results["app"] = {"title": data.get("title", title)}
+
+            yp = self.build_you_prompt(you_hint, world)
+            app_prompt_text = (
+                f"你是一个应用设置设计师。\n"
+                f"【世界观】{world}\n【标题】{title}\n\n"
+                f"请生成 app 标题（5-15字）\n"
+                f'返回纯 JSON：{{"title":"..."}}\n'
+                f"只返回 JSON。"
+            )
+            writing_tasks = [
+                (yp, _cb_you, 1000),
+                (app_prompt_text, _cb_app, 400),
+            ]
+
+            # ── Sequential phase execution ──
+            def _run_all():
+                # Phase 2: Scenes
+                scene_done = threading.Event()
+
+                def _on_scenes_done():
+                    scene_done.set()
+
+                if scene_tasks:
+                    _run_phase(scene_tasks, "scene", 2, _on_scenes_done)
+                    scene_done.wait()
+                else:
+                    on_phase_progress("scene", "", 0, 0, 2)
+
+                # Phase 3: Characters
+                char_done = threading.Event()
+
+                def _on_chars_done():
+                    char_done.set()
+
+                if char_tasks:
+                    _run_phase(char_tasks, "char", 3, _on_chars_done)
+                    char_done.wait()
+                else:
+                    on_phase_progress("char", "", 0, 0, 3)
+
+                # Phase 4: Writing
+                write_done = threading.Event()
+
+                def _on_write_done():
+                    write_done.set()
+
+                _run_phase(writing_tasks, "writing", 4, _on_write_done)
+                write_done.wait()
+
+                on_all_done(results, errors)
+
+            threading.Thread(target=_run_all, daemon=True).start()
+
+        call_chat_completion_async(
+            messages=[
+                {"role": "system", "content": "你是一个剧本规划师，只返回JSON。"},
+                {"role": "user", "content": plan_prompt},
+            ],
+            temperature=0.85,
+            max_tokens=1200,
+            timeout=45.0,
+            on_result=_on_plan_result,
+            on_error=lambda err: on_error(str(err)) if on_error else None,
+        )
+
+    # ═══ AI 一键创建剧本（旧版：单次调用）═══
 
     def build_profile_generation_prompt(self, description: str) -> str:
         """构建「一键创建剧本」prompt：从描述生成世界/场景/角色。"""

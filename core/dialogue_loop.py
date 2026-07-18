@@ -23,6 +23,7 @@ from typing import Optional
 
 from core.events import EventBus
 from services.api_service import APIError
+import config
 
 
 class DialogueLoop:
@@ -335,48 +336,123 @@ class DialogueLoop:
                 # ═══ 调 LLM ═══
                 st = self.app.char_styles.get(name, {})
                 dname = st.get("name", name)
-                reply, error = self.ai._call_llm(name)
 
-                if self._stop_event.is_set():
-                    break
+                use_streaming = config.STREAMING_ENABLED
 
-                if error:
-                    if error.startswith("api_error_stop:"):
-                        err_msg = error.split(":", 1)[1]
-                        self.bus.emit("api_error_stop", err_msg)
-                        self.stop()
-                        return
-                    # 非致命错误：显示占位文本，继续
-                    self.bus.emit("set_status", f"API 错误: {error}")
+                if use_streaming:
+                    # ── 流式路径 ──
+                    msg_id = f"{name}_{self.app.turn_count}"
+                    entry = {
+                        "name": name,
+                        "display_name": dname,
+                        "text": "",
+                        "time": datetime.now().strftime("%H:%M:%S"),
+                        "streaming": True,
+                        "msg_id": msg_id,
+                    }
+                    with self.app._history_lock:
+                        self.app.history.append(entry)
+                    self.app.turn_idx += 1
+                    self.app.turn_count += 1
+                    self.app._char_turns_since_event += 1
+                    if name and name != "You":
+                        self.app._char_last_turn[name] = self.app.turn_count
+                    self.app.message_count += 1
 
-                # 解析 [SCENE] / [NEXT] 标签
-                text = reply
-                if self.app.dynamic_scene_enabled:
-                    text, scene_dict = self.ai._parse_and_strip_scene_tag(text)
-                    if scene_dict:
-                        self._apply_scene_update(scene_dict)
+                    # 发初始气泡
+                    self.bus.emit("msg", dict(entry))
 
-                text, next_name = self.ai._parse_and_strip_next_tag(text)
-                if next_name and next_name in self.app._get_effective_order():
-                    self.app._suggested_next = next_name
+                    raw_buf = []
+                    last_flush = 0.0
+
+                    def on_token(tok):
+                        nonlocal last_flush
+                        raw_buf.append(tok)
+                        raw_text = "".join(raw_buf)
+                        entry["text"] = raw_text
+                        now = time.time()
+                        if "\n" in tok or (now - last_flush) > 0.08:
+                            self.bus.emit("msg_delta", dict(entry))
+                            last_flush = now
+
+                    text = ""
+                    try:
+                        reply, error = self.ai._call_llm_stream(name, on_token)
+
+                        if self._stop_event.is_set():
+                            break
+
+                        if error:
+                            if error.startswith("api_error_stop:"):
+                                err_msg = error.split(":", 1)[1]
+                                self.bus.emit("api_error_stop", err_msg)
+                                self.stop()
+                                return
+                            self.bus.emit("set_status", f"API 错误: {error}")
+
+                        # 解析 [SCENE] / [NEXT] 标签
+                        text = reply
+                        if self.app.dynamic_scene_enabled:
+                            text, scene_dict = self.ai._parse_and_strip_scene_tag(text)
+                            if scene_dict:
+                                self._apply_scene_update(scene_dict)
+
+                        text, next_name = self.ai._parse_and_strip_next_tag(text)
+                        if next_name and next_name in self.app._get_effective_order():
+                            self.app._suggested_next = next_name
+                        else:
+                            self.app._suggested_next = None
+
+                        text = text.strip()
+                    finally:
+                        entry["streaming"] = False
+                        if text:
+                            entry["text"] = text
+                        self.bus.emit("msg_end", dict(entry))
+
                 else:
-                    self.app._suggested_next = None
+                    # ── 非流式路径（原有逻辑）──
+                    reply, error = self.ai._call_llm(name)
 
-                entry = {
-                    "name": name,
-                    "display_name": dname,
-                    "text": text.strip(),
-                    "time": datetime.now().strftime("%H:%M:%S"),
-                }
-                with self.app._history_lock:
-                    self.app.history.append(entry)
-                self.app.turn_idx += 1
-                self.app.turn_count += 1
-                self.app._char_turns_since_event += 1
-                if name and name != "You":
-                    self.app._char_last_turn[name] = self.app.turn_count
-                self.app.message_count += 1
-                self.bus.emit("msg", entry)
+                    if self._stop_event.is_set():
+                        break
+
+                    if error:
+                        if error.startswith("api_error_stop:"):
+                            err_msg = error.split(":", 1)[1]
+                            self.bus.emit("api_error_stop", err_msg)
+                            self.stop()
+                            return
+                        self.bus.emit("set_status", f"API 错误: {error}")
+
+                    # 解析 [SCENE] / [NEXT] 标签
+                    text = reply
+                    if self.app.dynamic_scene_enabled:
+                        text, scene_dict = self.ai._parse_and_strip_scene_tag(text)
+                        if scene_dict:
+                            self._apply_scene_update(scene_dict)
+
+                    text, next_name = self.ai._parse_and_strip_next_tag(text)
+                    if next_name and next_name in self.app._get_effective_order():
+                        self.app._suggested_next = next_name
+                    else:
+                        self.app._suggested_next = None
+
+                    entry = {
+                        "name": name,
+                        "display_name": dname,
+                        "text": text.strip(),
+                        "time": datetime.now().strftime("%H:%M:%S"),
+                    }
+                    with self.app._history_lock:
+                        self.app.history.append(entry)
+                    self.app.turn_idx += 1
+                    self.app.turn_count += 1
+                    self.app._char_turns_since_event += 1
+                    if name and name != "You":
+                        self.app._char_last_turn[name] = self.app.turn_count
+                    self.app.message_count += 1
+                    self.bus.emit("msg", entry)
 
                 # 等待（速度控制），每 0.1s 检查暂停
                 total = self.app.speed * 0.1
@@ -392,6 +468,70 @@ class DialogueLoop:
                 time.sleep(0.5)
 
     # ═══ 随机事件辅助 ═══
+
+    def _stream_npc_dialogue(self, npc_name: str, generate_fn, is_farewell: bool = False,
+                             post_process=None):
+        """通用 NPC 流式对话发射。
+        generate_fn(on_token) → 返回完整文本；post_process(text) → 返回处理后文本。
+        使用 msg_delta/msg_end 事件复用现有 UI 流式更新管线。"""
+        msg_id = f"npc_{npc_name}_{self.app.turn_count}"
+        entry = {
+            "name": "__random__",
+            "display_name": npc_name,
+            "text": "",
+            "time": datetime.now().strftime("%H:%M:%S"),
+            "type": "random_npc",
+            "streaming": True,
+            "msg_id": msg_id,
+        }
+        if is_farewell:
+            entry["is_farewell"] = True
+
+        with self.app._history_lock:
+            self.app.history.append(entry)
+        self.app.turn_count += 1
+        self.app.message_count += 1
+        self.bus.emit("random_npc_msg", dict(entry))
+
+        raw_buf = []
+        last_flush = 0.0
+
+        def on_token(tok):
+            nonlocal last_flush
+            raw_buf.append(tok)
+            raw_text = "".join(raw_buf)
+            entry["text"] = raw_text
+            now = time.time()
+            if "\n" in tok or (now - last_flush) > 0.08:
+                self.bus.emit("msg_delta", dict(entry))
+                last_flush = now
+
+        response = ""
+        try:
+            response = generate_fn(on_token)
+        except Exception:
+            pass
+
+        if self._stop_event.is_set():
+            entry["streaming"] = False
+            self.bus.emit("msg_end", dict(entry))
+            if is_farewell:
+                self.app._active_npc = None
+                self.app._char_turns_since_event = 0
+            return response
+
+        if post_process:
+            response = post_process(response)
+
+        entry["text"] = response.strip()
+        entry["streaming"] = False
+        self.bus.emit("msg_end", dict(entry))
+
+        if is_farewell:
+            self.app._active_npc = None
+            self.app._char_turns_since_event = 0
+
+        return response
 
     def _handle_npc_logic(self, current_thread) -> bool:
         """处理活跃 NPC 的回应/沉默离开逻辑。
@@ -409,27 +549,44 @@ class DialogueLoop:
         if (last_msg and last_msg.get("type") not in ("random_npc", "random_event", "director")
                 and self.ai._npc_is_mentioned(last_text)):
             self.bus.emit("set_status", f"路人\"{self.app._active_npc['name']}\"正在回应...")
-            response = self.ai._generate_npc_response()
-            if self._stop_event.is_set():
-                return True
             self.app._npc_silent_turns = 0
             self.app._npc_rounds_left -= 1
             npc_name = self.app._active_npc["name"]
             npc_is_departing = self.app._npc_rounds_left <= 0
             if npc_is_departing:
                 print(f"[random_npc] NPC '{npc_name}' rounds exhausted, departing")
-                if "离开" not in response:
-                    response = response + " *说完便转身离开了*"
-            entry = {
-                "name": "__random__",
-                "display_name": npc_name,
-                "text": response,
-                "time": datetime.now().strftime("%H:%M:%S"),
-                "type": "random_npc",
-            }
-            if npc_is_departing:
-                entry["is_farewell"] = True
-            self._emit_npc_message(entry)
+
+            if config.STREAMING_ENABLED:
+                def _departure_process(text):
+                    if "离开" not in text:
+                        return text + " *说完便转身离开了*"
+                    return text
+
+                self._stream_npc_dialogue(
+                    npc_name,
+                    self.ai._generate_npc_response_stream,
+                    is_farewell=npc_is_departing,
+                    post_process=_departure_process if npc_is_departing else None,
+                )
+                if self._stop_event.is_set():
+                    return True
+            else:
+                response = self.ai._generate_npc_response()
+                if self._stop_event.is_set():
+                    return True
+                if npc_is_departing:
+                    if "离开" not in response:
+                        response = response + " *说完便转身离开了*"
+                entry = {
+                    "name": "__random__",
+                    "display_name": npc_name,
+                    "text": response,
+                    "time": datetime.now().strftime("%H:%M:%S"),
+                    "type": "random_npc",
+                }
+                if npc_is_departing:
+                    entry["is_farewell"] = True
+                self._emit_npc_message(entry)
             if not self.paused:
                 self.bus.emit("set_status", "运行中")
             time.sleep(0.15)
@@ -465,19 +622,29 @@ class DialogueLoop:
         if result.get("type") == "npc":
             npc_name = result.get("name", "路人")
             npc_desc = result.get("desc", "")
-            dialogue = result.get("dialogue", "")
             self.app._active_npc = {"name": npc_name, "desc": npc_desc}
             self.app._npc_rounds_left = 2
             self.app._npc_silent_turns = 0
             print(f"[random_npc] introduced: '{npc_name}' rounds_left=2")
-            entry = {
-                "name": "__random__",
-                "display_name": npc_name,
-                "text": dialogue,
-                "time": datetime.now().strftime("%H:%M:%S"),
-                "type": "random_npc",
-            }
-            self._emit_npc_message(entry)
+
+            if config.STREAMING_ENABLED:
+                self._stream_npc_dialogue(
+                    npc_name,
+                    self.ai._generate_npc_intro_stream,
+                    is_farewell=False,
+                )
+                if self._stop_event.is_set():
+                    return
+            else:
+                dialogue = result.get("dialogue", "")
+                entry = {
+                    "name": "__random__",
+                    "display_name": npc_name,
+                    "text": dialogue,
+                    "time": datetime.now().strftime("%H:%M:%S"),
+                    "type": "random_npc",
+                }
+                self._emit_npc_message(entry)
         else:
             event_text = result.get("text", "")
             self.app._char_turns_since_event = 0

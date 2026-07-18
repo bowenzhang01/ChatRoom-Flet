@@ -6,7 +6,8 @@
     "director_mode": false,
     "user_mode": false,
     "display_name": "女生寝室·日常",
-    "random_event": false
+    "random_event": false,
+    "dynamic_scene": false
   },
   "turn": {
     "order": [
@@ -17,7 +18,7 @@
     ]
   },
   "speed": {
-    "default": 3
+    "default": 1
   },
   "world": {
     "setting": "一所普通大学的女生寝室，日常温馨的校园生活。故事围绕室友们的相处和成长展开。"

@@ -121,7 +121,7 @@ class ProfilesView(ViewBase):
                 ft.Container(
                     content=ft.Row(
                         controls=[
-                            ft.TextButton(content=ft.Text("← 返回"), icon=ft.Icons.ARROW_BACK,
+                            ft.TextButton(content=ft.Text("← 返回"),
                                           on_click=lambda e: self._back_to_list()),
                             ft.Text(meta["title"], size=20, weight=ft.FontWeight.W_700),
                             ft.Container(expand=True),
@@ -328,7 +328,7 @@ class ProfilesView(ViewBase):
             if not scenes:
                 dlg.fail("未能生成场景")
                 return
-            dlg.set_step(1, "正在写入剧本…")
+            dlg.set_step(1, "正在写入剧本…", delay=0.1)
             try:
                 for sc in scenes:
                     if isinstance(sc, dict) and sc.get("time"):
@@ -364,7 +364,7 @@ class ProfilesView(ViewBase):
             if not chars:
                 dlg.fail("未能生成角色")
                 return
-            dlg.set_step(1, "正在写入剧本…")
+            dlg.set_step(1, "正在写入剧本…", delay=0.1)
             try:
                 added = 0
                 for c in chars:
@@ -412,7 +412,7 @@ class ProfilesView(ViewBase):
             if not data:
                 dlg.fail("未能生成补全内容")
                 return
-            dlg.set_step(1, "正在保存角色…")
+            dlg.set_step(1, "正在保存角色…", delay=0.1)
             try:
                 # 合并：保留原字段，用 AI 结果填充缺失项
                 original = self.state.characters.get(name, {})
@@ -654,7 +654,7 @@ class ProfilesView(ViewBase):
                 self._do_switch_and_enter(folder)
 
             def _on_saving(_data):
-                save_dlg.set_step(1, "正在生成对话标题…")
+                save_dlg.set_step(1, "正在生成对话标题…", delay=0.1)
 
             def _on_saved(data):
                 ok = data.get("success", False) if isinstance(data, dict) else False
@@ -666,7 +666,7 @@ class ProfilesView(ViewBase):
                 except Exception:
                     pass
                 if ok:
-                    save_dlg.set_step(2, "正在切换剧本…")
+                    save_dlg.set_step(2, "正在切换剧本…", delay=0.1)
                     save_dlg.complete(
                         f"保存成功：{title}" if title else "保存成功",
                         on_close=_do_switch,
@@ -960,73 +960,126 @@ class ProfilesView(ViewBase):
 
     def _ai_step2_generate(self, desc: str):
         pdlg = ProgressDialog(self.page, title="✨ 生成中")
+        _steps = ["分析描述", "生成世界观", "生成场景", "生成角色", "写入剧本"]
         pdlg.show(
-            status="正在解析描述…",
-            steps=["解析描述", "生成世界观与场景", "生成角色", "整理发言顺序", "写入剧本"],
+            status="正在分析描述…",
+            steps=_steps,
             indeterminate=True,
         )
-        pdlg.set_step(0, "正在解析描述…")
+        pdlg.set_step(0, "正在分析描述…")
 
-        def _on_result(data):
-            # 创建剧本并填充
+        _current_step = [0]  # track which step icon is active
+
+        def _advance_step(new_idx, status):
+            if new_idx > _current_step[0]:
+                _current_step[0] = new_idx
+                pdlg.set_step(new_idx, status, delay=0.08)
+
+        def _on_plan_ready(blueprint):
+            _current_step[0] = 0
+            _advance_step(1, "正在生成世界观…")
+
+        _phase_labels = {"scene": "生成场景", "char": "生成角色", "writing": "写入剧本"}
+        _step_defaults = {1: "正在生成世界观…", 2: "正在生成场景…", 3: "正在生成角色…", 4: "正在写入剧本…"}
+
+        def _on_phase_progress(phase, task_name, phase_done, phase_total, step_idx):
+            default_status = _step_defaults.get(step_idx)
+            _advance_step(step_idx, default_status)
+            label = _phase_labels.get(phase, "生成中")
+            if phase_total > 0:
+                pdlg.set_progress_fraction(phase_done, phase_total, label)
+            else:
+                pdlg.set_status(f"{label} (0/0)")
+
+        def _on_all_done(results, errors):
             try:
-                pdlg.set_step(1, "正在生成世界观与场景…")
-                title = data.get("title", "新剧本")
+                _advance_step(4, "正在保存剧本…")
+                world = results.get("world", "")
+                title = results.get("title", "新剧本")
                 folder = self.state.data.create_profile(title)
                 if not folder:
                     pdlg.fail("创建失败：名称冲突")
                     return
                 self.state.switch_profile(folder)
-                # 世界观
-                self.state._profile_config.setdefault("world", {})["setting"] = data.get("world", "")
+                self.state._profile_config.setdefault("world", {})["setting"] = world
+
                 # 场景
-                scenes = data.get("scenes", [])
-                self.state.scenes = scenes if scenes else self.state.scenes
+                scene_list = []
+                for s in results.get("scenes", []):
+                    if s and isinstance(s, dict) and s.get("time"):
+                        scene_list.append(s)
+                self.state.scenes = scene_list if scene_list else self.state.scenes
                 self.state.data._save_scenes()
 
-                pdlg.set_step(2, "正在生成角色…")
                 # 角色
-                for c in data.get("characters", []):
-                    name = c.get("name", "char")
+                written_names = set()
+                for cname in sorted(results.get("characters", {}).keys()):
+                    c = results["characters"][cname]
+                    safe_name = c.get("name", cname)
+                    if safe_name in written_names or safe_name == "You":
+                        base = safe_name
+                        idx = 2
+                        while base in written_names or base == "You":
+                            base = f"{safe_name}{idx}"
+                            idx += 1
+                        safe_name = base
+                    written_names.add(safe_name)
+                    c["name"] = safe_name
                     c.setdefault("color", "#888888")
-                    self.state.data._save_character(name + ".json", c)
-                # 确保 You 存在
-                if "You" not in self.state.characters:
+                    c.setdefault("bg_color", "#f5f5f5")
+                    self.state.data._save_character(safe_name + ".json", c)
+
+                # You 角色
+                you = results.get("you")
+                if you:
+                    you.setdefault("color", "#42a5f5")
+                    you.setdefault("bg_color", "#f0f7ff")
+                    self.state.data._save_character("You.json", you)
+                elif "You" not in self.state.characters:
                     self.state.data._save_character("You.json", {
-                        "name": "You",
-                        "display_name": "你",
-                        "color": "#42a5f5",
-                        "bg_color": "#f0f7ff",
+                        "name": "You", "display_name": "你",
+                        "color": "#42a5f5", "bg_color": "#f0f7ff",
                         "personality": "你自己",
                         "description": "就是你自己～一个和大家一起生活的普通人。",
                         "system_prompt": "你是这个世界的一员，和伙伴们自然地聊天。对话内容用直角引号「」包裹，动作描写用*星号*包裹，例如：*伸了个懒腰*、*笑着拍拍她的肩*。回复简短自然，100-200字。",
                     })
 
-                pdlg.set_step(3, "正在整理发言顺序…")
                 # 发言顺序
-                order = data.get("turn_order", [c.get("name") for c in data.get("characters", [])])
+                order = [c.get("name") for c in (results.get("characters", {}) or {}).values() if c.get("name")]
+                order.append("You")
                 self.state.turn_order = [n for n in order if n]
                 self.state.data._save_turn_order()
                 self.state.data._save_profile_config()
                 self.state.data._reload_data()
 
-                pdlg.set_step(4, "正在写入剧本…")
-                n_chars = len(data.get("characters", []))
-                n_scenes = len(scenes)
-                pdlg.complete(
-                    f"已生成「{title}」· {n_chars} 角色 · {n_scenes} 场景",
-                    on_close=lambda: self._ai_step3(folder, title, n_chars, n_scenes),
-                    auto_close_ms=0,
-                )
+                n_chars = len(written_names) + 1
+                n_scenes = len(scene_list)
+                if errors:
+                    failed = "、".join(errors)
+                    pdlg.complete(
+                        f"已生成「{title}」· {n_chars} 角色 · {n_scenes} 场景（部分失败: {failed}）",
+                        on_close=lambda: self._ai_step3(folder, title, n_chars, n_scenes),
+                    )
+                else:
+                    pdlg.complete(
+                        f"已生成「{title}」· {n_chars} 角色 · {n_scenes} 场景",
+                        on_close=lambda: self._ai_step3(folder, title, n_chars, n_scenes),
+                    )
             except Exception as ex:
                 print(f"[ai_create] 填充剧本失败: {ex}")
-                pdlg.fail("生成失败：" + str(ex)[:80])
+                pdlg.fail("写入失败：" + str(ex)[:80])
 
         def _on_error(msg):
             pdlg.fail("生成失败：" + str(msg)[:80])
 
         try:
-            self.state.ai.generate_profile_async(desc, _on_result, _on_error)
+            self.state.ai.generate_profile_batch_async(
+                desc,
+                on_plan_ready=_on_plan_ready,
+                on_phase_progress=_on_phase_progress,
+                on_all_done=_on_all_done,
+                on_error=_on_error,
+            )
         except Exception as ex:
             pdlg.fail("生成失败：" + str(ex)[:80])
 
