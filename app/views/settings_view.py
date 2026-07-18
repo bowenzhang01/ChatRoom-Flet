@@ -11,7 +11,7 @@ import flet as ft
 
 import config
 from app.views import ViewBase
-from app.theme import THEME_MODES, COLORS, COLOR_THEMES, rebuild_themes
+from app.theme import THEME_MODES, COLORS, COLOR_THEMES, rebuild_themes, get_color_theme_key
 from services.api_service import test_connection_async, fetch_models_async
 
 __all__ = ["SettingsView"]
@@ -40,6 +40,7 @@ class SettingsView(ViewBase):
         self._speed_dd: ft.Dropdown = None
         self._streaming_sw: ft.Switch = None
         self._color_theme_dd: ft.Dropdown = None
+        self._about_theme_text: ft.Text = None
 
     def build(self) -> ft.Control:
         self._root = ft.Column(
@@ -269,6 +270,9 @@ class SettingsView(ViewBase):
             self.ui.save_color_theme()
             rebuild_themes(self.page, key)
             self.page.theme_mode = self.ui.theme_mode()
+            if self._about_theme_text:
+                self._about_theme_text.value = COLOR_THEMES[key].get("name", key)
+                self._about_theme_text.update()
             self.page.update()
 
     def _on_theme_change(self, e):
@@ -369,13 +373,15 @@ class SettingsView(ViewBase):
 
     # ═══ 关于 ═══
     def _build_about_card(self) -> ft.Control:
+        theme_name = COLOR_THEMES.get(get_color_theme_key(), {}).get("name", "极光")
+        self._about_theme_text = ft.Text(theme_name, size=12)
         return self._card("关于", [
             ft.Row([ft.Text("版本", size=12, color=ft.Colors.ON_SURFACE_VARIANT),
                     ft.Text(_VERSION, size=12)], spacing=12),
             ft.Row([ft.Text("框架", size=12, color=ft.Colors.ON_SURFACE_VARIANT),
                     ft.Text("Flet 0.86.0", size=12)], spacing=12),
             ft.Row([ft.Text("主题", size=12, color=ft.Colors.ON_SURFACE_VARIANT),
-                    ft.Text("四色光谱 Spectrum", size=12)], spacing=12),
+                    self._about_theme_text], spacing=12),
             ft.Container(height=4),
             ft.Text("问题反馈：请在项目仓库提交 Issue", size=11, color=ft.Colors.ON_SURFACE_VARIANT),
             ft.Text("许可证：MIT", size=11, color=ft.Colors.ON_SURFACE_VARIANT),
