@@ -147,67 +147,229 @@ dorm-flet/
 
 ### 环境要求
 
-- Python 3.10+
-- DeepSeek API Key（或兼容 OpenAI 接口的其他 LLM 服务）
+| 依赖 | 说明 |
+|:---|:---|
+| Python 3.10+（推荐 3.12） | 跨平台兼容性最佳 |
+| DeepSeek API Key | [免费注册](https://platform.deepseek.com)，新用户送额度 |
+| （可选）Git | 克隆项目 |
 
-### 1. 安装
+> ⚠️ Flet 要求 Python ≥ 3.10，本项目未在 3.14+ 上充分测试，建议使用 **Python 3.12**。
+
+### 1. 克隆 & 进入项目
+
+```bash
+git clone https://github.com/bowenzhang01/Chatroom-Flet.git
+cd Chatroom-Flet
+```
+
+### 2. 创建虚拟环境
+
+虽然不是必须，但强烈推荐隔离环境：
+
+```bash
+# Windows
+python -m venv venv
+.\venv\Scripts\activate
+
+# Linux / macOS
+python3 -m venv venv
+source venv/bin/activate
+```
+
+### 3. 安装依赖
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. 配置
+核心依赖很简单，只有两个：
+
+| 包 | 版本 | 作用 |
+|:---|:---|:---|
+| `flet` | ≥ 0.24.0 | UI 框架，安装后自带 `flet` CLI 工具 |
+| `httpx` | ≥ 0.28.0 | HTTP 客户端，用于调用 LLM API（含 SSE 流式传输） |
+
+> 💡 国内网络慢？用清华镜像：`pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple`
+
+### 4. 配置 API Key
+
+程序启动时需要 LLM API Key。三种方式任选：
+
+**🌍 方式 A：环境变量（最安全，推荐）**
+
+```bash
+# Windows PowerShell
+$env:DEEPSEEK_API_KEY = "sk-你的密钥"
+
+# Linux / macOS / WSL
+export DEEPSEEK_API_KEY="sk-你的密钥"
+```
+
+**📄 方式 B：配置文件**
 
 ```bash
 cp config.example.json config.json
 ```
 
-编辑 `config.json`，填入 API Key：
+编辑 `config.json`：
+```json
+{
+  "model": {
+    "api_key": "sk-你的密钥",
+    "api_base": "https://api.deepseek.com",
+    "model": "deepseek-v4-flash"
+  }
+}
+```
+
+> `config.json` 已在 `.gitignore` 中，不会被误传到 GitHub。
+
+**🔌 方式 C：使用其他 API 服务**
+
+任何兼容 OpenAI chat/completions 接口的服务均可使用。设置 `OPENAI_API_KEY` 或修改 `api_base`：
 
 ```json
 {
   "model": {
-    "api_key": "sk-你的Key",
-    "api_base": "https://api.deepseek.com",
-    "model": "deepseek-v4-flash"
-  },
-  "active_profile": "dorm_life"
+    "api_key": "你的Key",
+    "api_base": "https://api.openai.com/v1",
+    "model": "gpt-4o-mini"
+  }
 }
 ```
 
-> 💡 也可设置环境变量 `DEEPSEEK_API_KEY`，优先级高于配置文件，更安全。
+也支持 Ollama 本地模型（`http://localhost:11434/v1`）、阿里百炼、硅基流动等。
 
-### 3. 运行
+### 5. 启动
 
 ```bash
-# Web 模式（推荐开发调试）
+# Web 模式 — 浏览器自动打开 http://localhost:8080
 flet run main.py --web --port 8080
 
-# 桌面模式
+# 桌面模式 — 本机原生窗口
 flet run main.py
 ```
 
-### 调试模式
+看到界面后：进入「⚙️ 设置」→ 点击「测试连接」确认 API 通 → 回「💬 聊天」点「▶ 开始对话」→ 角色们开始自主聊天！
+
+### 6. 调试模式
+
+需要排查时开启，终端会输出线程检查、状态校验、EventBus 订阅追踪：
 
 ```bash
-# Windows
-$env:DEBUG="dorm"; flet run main.py
+# Windows PowerShell
+$env:DEBUG="dorm"; flet run main.py --web
 
 # Linux / macOS
-DEBUG=dorm flet run main.py
+DEBUG=dorm flet run main.py --web
 ```
 
 ---
 
 ## 📦 构建发布
 
+Flet 可将 Python 项目编译为独立应用。不同平台难度差异较大：
+
+| 平台 | 命令 | 难度 | 产物 |
+|:---|:---|:---|:---|
+| 🌐 Web | `flet build web` | ⭐ 简单 | `build/web/` 静态文件 |
+| 🪟 Windows | `flet build windows` / `build.ps1` | ⭐⭐⭐ 坑多 | `dist/` 文件夹（含 .exe + DLL） |
+| 🍎 macOS | `flet build macos` | ⭐⭐ 中等 | `.app` 包 |
+| 📱 Android | `flet build apk` | ⭐⭐ 中等 | `.apk` |
+| 📱 iOS | `flet build ios` | ⭐⭐⭐ 较复杂 | `.ipa`（需 macOS + Xcode） |
+
+### 🌐 Web — 最简单的发布方式
+
 ```bash
-flet build web      # Web 部署
-flet build windows  # Windows 桌面
-flet build macos    # macOS
-flet build apk      # Android
-flet build ios      # iOS
+flet build web
 ```
+
+生成 `build/web/` 目录，直接部署到任意静态托管：
+
+```bash
+# 本地预览
+cd build/web && python -m http.server 8080
+
+# 可部署到 GitHub Pages / Vercel / Netlify / Cloudflare Pages
+```
+
+Web 版无需安装任何运行时，浏览器打开即用。
+
+### 🪟 Windows 桌面 — 一键打包脚本
+
+Windows 编译需要以下前置环境：
+
+- **Visual Studio 2022 Build Tools**（勾选「使用 C++ 的桌面开发」工作负载）→ [下载](https://visualstudio.microsoft.com/zh-hans/downloads/)
+- **Windows 开发者模式**（只需执行一次）：
+  ```powershell
+  # 以管理员身份运行 PowerShell
+  reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" /v AllowDevelopmentWithoutDevLicense /t REG_DWORD /d 1 /f
+  ```
+
+满足后，项目内置的 `build.ps1` 脚本自动处理一切（首次会下载 Flutter SDK ~1GB）：
+
+```powershell
+# 在项目根目录运行
+.\build.ps1
+
+# 指定应用名称
+.\build.ps1 -ProductName "ChatRoom"
+```
+
+脚本自动完成：
+1. 检查环境（flet / Flutter / 依赖）
+2. 建立 Flutter 项目骨架
+3. 下载缓存文件（Python standalone / bridge DLL）
+4. 打包 Python 应用（serious_python）
+5. 编译 Flutter Windows 壳（自动打 UTF-8 编码补丁）
+6. 补齐缺失的 DLL 和数据文件
+7. 安装运行时 Python 依赖 + 替换源码
+
+完成后 `dist\ChatRoom\` 就是可分发的文件夹，压缩即可。
+
+> 📝 Windows 编译容易踩的坑：GBK 编码错误 / DLL 缺失 / Python 版本漂移 / GitHub 下载超时。
+> 详细原因和解决方案见 `BUILD_WINDOWS_NOTES.md`。首次构建建议挂代理。
+
+### 🍎 macOS
+
+```bash
+# 安装前置工具
+xcode-select --install
+
+# 构建
+flet build macos
+```
+
+### 📱 Android
+
+```bash
+flet build apk
+```
+
+前置条件：
+- 安装 [Android Studio](https://developer.android.com/studio)
+- SDK Manager → 安装 Android SDK Platform 34+
+- 设置环境变量 `ANDROID_HOME`（通常为 `%LOCALAPPDATA%\Android\Sdk`）
+- JDK 17+
+
+### 📱 iOS
+
+```bash
+flet build ios
+```
+
+前置条件：macOS + Xcode 15+。真机部署需 Apple Developer 账号。
+
+### ⚙️ 自定义应用名称和图标
+
+```bash
+flet build web \
+  --product "ChatRoom" \
+  --description "AI 多人角色扮演聊天室" \
+  --icon assets/icon.png
+```
+
+更多构建选项见 `flet build --help`。
 
 ---
 
