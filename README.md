@@ -278,7 +278,7 @@ Flet 可将 Python 项目编译为独立应用：
 | 平台 | 命令 | 产物 |
 |:---|:---|:---|
 | 🌐 Web | `flet build web` | `build/web/` 静态文件 |
-| 🪟 Windows | `flet build windows` / `build.ps1` | `dist/` 文件夹（含 .exe + DLL） |
+| 🪟 Windows | `flet build windows` | `build/windows/` 文件夹 |
 | 🍎 macOS | `flet build macos` | `.app` 包 |
 | 📱 Android | `flet build apk` | `.apk` |
 | 📱 iOS | `flet build ios` | `.ipa`（需 macOS + Xcode） |
@@ -300,28 +300,40 @@ cd build/web && python -m http.server 8080
 
 Web 版无需安装任何运行时，浏览器打开即用。
 
-### 🪟 Windows 桌面 — 一键打包脚本
+### 🪟 Windows 桌面
 
-Windows 编译需要以下前置环境：
+**前置环境：**
 
-- **Visual Studio 2022 Build Tools**（勾选「使用 C++ 的桌面开发」工作负载）→ [下载](https://visualstudio.microsoft.com/zh-hans/downloads/)
-- **Windows 开发者模式**（只需执行一次）：
-  ```powershell
-  # 以管理员身份运行 PowerShell
-  reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" /v AllowDevelopmentWithoutDevLicense /t REG_DWORD /d 1 /f
-  ```
+1. **Visual Studio 2022 Build Tools** — [下载](https://visualstudio.microsoft.com/zh-hans/downloads/)，安装时勾选「使用 C++ 的桌面开发」工作负载
+2. **启用开发者模式**（仅需一次）：
+   ```powershell
+   # 以管理员身份运行 PowerShell
+   reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" /v AllowDevelopmentWithoutDevLicense /t REG_DWORD /d 1 /f
+   ```
 
-满足后，项目内置的 `build.ps1` 脚本自动处理一切（首次会下载 Flutter SDK ~1GB）：
+**构建：**
 
-```powershell
-# 在项目根目录运行
-.\build.ps1
-
-# 指定应用名称
-.\build.ps1 -ProductName "ChatRoom"
+```bash
+# 首次构建会自动下载 Flutter SDK（~1GB），之后缓存复用
+flet build windows --product "ChatRoom"
 ```
 
-完成后 `dist\ChatRoom\` 就是可分发的文件夹，压缩即可。
+构建完成后产物在 `build/windows/` 目录。如需分发，将整个输出文件夹打包即可。
+
+**自定义选项：**
+
+```bash
+flet build windows \
+  --product "ChatRoom" \
+  --description "AI 多人角色扮演聊天室" \
+  --icon assets/icon.png
+```
+
+常见的 `flet build` 参数：
+- `--product`：应用名称（显示在窗口标题栏）
+- `--description`：应用描述
+- `--icon`：应用图标（建议 256×256 PNG）
+- `--python-version`：指定 Python 版本（如 `3.12`），默认跟随系统
 
 ### 🍎 macOS
 
