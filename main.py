@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""ChatRoom - Flet Edition · 入口脚本。"""
+"""ChatRoom · 入口脚本。"""
 
 import flet as ft
 

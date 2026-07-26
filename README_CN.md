@@ -100,7 +100,7 @@ ChatRoom 的前身是 Kivy 桌面应用 [ChatRoom](https://github.com/bowenzhang
 ## 🏗️ 项目架构
 
 ```
-dorm-flet/
+chatroom/
 ├── main.py                    # 入口脚本
 ├── config.py                  # 全局配置 & 路径常量
 ├── utils.py                   # 纯工具（JSON/颜色/流解析）

@@ -100,7 +100,7 @@ Nine gradient color themes spanning the full spectrum from crimson to violet. Ea
 ## 🏗️ Architecture
 
 ```
-dorm-flet/
+chatroom/
 ├── main.py                    # Entry point
 ├── config.py                  # Global config & path constants
 ├── utils.py                   # Pure utilities (JSON, color, stream parsing)
