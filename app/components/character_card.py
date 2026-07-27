@@ -38,16 +38,16 @@ class CharacterCard:
         )
         if is_you:
             menu_items = [
-                ft.PopupMenuItem(content=ft.Text("编辑"), icon=ft.Icons.EDIT,
+                ft.PopupMenuItem(content=ft.Text("Edit"), icon=ft.Icons.EDIT,
                                  on_click=lambda e: self._edit()),
             ]
         else:
             menu_items = [
-                ft.PopupMenuItem(content=ft.Text("编辑"), icon=ft.Icons.EDIT,
+                ft.PopupMenuItem(content=ft.Text("Edit"), icon=ft.Icons.EDIT,
                                  on_click=lambda e: self._edit()),
-                ft.PopupMenuItem(content=ft.Text("删除"), icon=ft.Icons.DELETE_OUTLINE,
+                ft.PopupMenuItem(content=ft.Text("Delete"), icon=ft.Icons.DELETE_OUTLINE,
                                  on_click=lambda e: self._menu("delete")),
-                ft.PopupMenuItem(content=ft.Text("复制"), icon=ft.Icons.CONTENT_COPY,
+                ft.PopupMenuItem(content=ft.Text("Duplicate"), icon=ft.Icons.CONTENT_COPY,
                                  on_click=lambda e: self._menu("duplicate")),
             ]
         menu_btn = ft.PopupMenuButton(icon=ft.Icons.MORE_VERT, items=menu_items)
@@ -66,7 +66,7 @@ class CharacterCard:
         if is_you:
             header_controls.append(
                 ft.Container(
-                    content=ft.Text("👤 你", size=TEXT_XS, color=ft.Colors.PRIMARY),
+                    content=ft.Text("👤 You", size=TEXT_XS, color=ft.Colors.PRIMARY),
                     padding=ft.Padding.symmetric(horizontal=6, vertical=2),
                     border_radius=8,
                     bgcolor=ft.Colors.PRIMARY_CONTAINER,
@@ -86,7 +86,7 @@ class CharacterCard:
                         ft.Row(
                             controls=[
                                 ft.TextButton(
-                                    content=ft.Text("补全"),
+                                    content=ft.Text("Complete"),
                                     icon=ft.Icons.AUTO_AWESOME,
                                     style=ft.ButtonStyle(padding=ft.Padding.symmetric(horizontal=8, vertical=4)),
                                     on_click=lambda e: self._ai(),
@@ -137,7 +137,7 @@ class AddCharacterCard:
                 content=ft.Column(
                     controls=[
                         ft.Icon(ft.Icons.PERSON_ADD, size=28, color=ft.Colors.PRIMARY),
-                        ft.Text("新角色", size=TEXT_SM, weight=ft.FontWeight.W_500),
+                        ft.Text("New Character", size=TEXT_SM, weight=ft.FontWeight.W_500),
                     ],
                     alignment=ft.MainAxisAlignment.CENTER,
                     horizontal_alignment=ft.CrossAxisAlignment.CENTER,
@@ -159,7 +159,7 @@ class AddCharacterCard:
 
 
 class AIGenerateCharacterCard:
-    """✨ AI 生成角色卡。"""
+    """✨ AI generate character card."""
 
     def __init__(self, page: ft.Page, on_generate=None):
         self.page = page
@@ -172,7 +172,7 @@ class AIGenerateCharacterCard:
                 content=ft.Column(
                     controls=[
                         ft.Icon(ft.Icons.AUTO_AWESOME, size=28, color=ft.Colors.SECONDARY),
-                        ft.Text("AI 生成", size=TEXT_SM, weight=ft.FontWeight.W_500),
+                        ft.Text("AI Generate", size=TEXT_SM, weight=ft.FontWeight.W_500),
                     ],
                     alignment=ft.MainAxisAlignment.CENTER,
                     horizontal_alignment=ft.CrossAxisAlignment.CENTER,

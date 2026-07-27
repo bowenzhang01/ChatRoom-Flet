@@ -27,27 +27,27 @@ class APIError(Exception):
 
 
 def _parse_error(e: Exception) -> str:
-    """解析 HTTP/网络异常，返回人类可读消息"""
+    """Parse HTTP/network exceptions, return human-readable messages"""
     msg = str(e)
-    print(f"[api] 异常类型={type(e).__name__} 消息={msg}")
+    print(f"[api] Exception type={type(e).__name__} message={msg}")
     if isinstance(e, httpx.HTTPStatusError):
         code = e.response.status_code
         if code == 401:
-            return "API Key 无效，请检查设置"
+            return "Invalid API Key, please check settings"
         elif code == 403:
-            return "API 访问被拒绝，请检查 Key 权限"
+            return "API access denied, please check Key permissions"
         elif code == 429:
-            return "API 请求太频繁，请稍后重试"
+            return "API rate limit exceeded, please retry later"
         elif code >= 500:
-            return f"API 服务器错误 (HTTP {code})"
+            return f"API server error (HTTP {code})"
         else:
-            return f"API 请求失败 (HTTP {code})"
+            return f"API request failed (HTTP {code})"
     if "timed out" in msg.lower() or "timeout" in msg.lower():
-        return "连接 API 超时，请检查网络"
+        return "API connection timed out, please check network"
     if "connection" in msg.lower() or "refused" in msg.lower():
-        return "无法连接 API 服务器，请检查网络和地址"
+        return "Cannot connect to API server, please check network and address"
     if "name resolution" in msg.lower() or "getaddrinfo" in msg.lower():
-        return "无法解析 API 服务器地址（请确认 API 地址正确；WSL 环境请检查 /etc/resolv.conf DNS 配置）"
+        return "Cannot resolve API server address (check API URL; WSL users check /etc/resolv.conf DNS config)"
     return msg[:120]
 
 
@@ -92,7 +92,7 @@ def call_chat_completion(
         max_tokens = config.MAX_TOKENS
 
     if not api_key:
-        raise APIError("未配置 API Key")
+        raise APIError("API Key not configured")
 
     url = f"{api_base}/chat/completions"
     print(f"[api] POST {url} | model={model} | timeout={timeout}s")
@@ -214,9 +214,9 @@ def call_chat_completion_stream(
         max_tokens = config.MAX_TOKENS
 
     if not api_key:
-        raise APIError("未配置 API Key")
+        raise APIError("API Key not configured")
 
-    # 流式：read timeout 给 120s（推理模型首 token 可能 60-120s）；connect 10s
+    # Streaming: read timeout 120s（推理模型首 token 可能 60-120s）；connect 10s
     if isinstance(timeout, (int, float)):
         timeout = httpx.Timeout(connect=10.0, read=float(timeout) * 2, write=10.0, pool=10.0)
 
@@ -401,7 +401,7 @@ def test_connection_async(
                 data = r.json()
                 count = len(data.get("data", []))
                 if on_result:
-                    on_result(True, f"连接正常，可用模型 {count} 个")
+                    on_result(True, f"Connected, {count} models available")
         except APIError as e:
             if on_result:
                 on_result(False, str(e))

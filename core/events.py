@@ -62,7 +62,7 @@ class EventBus:
             try:
                 h(data)
             except Exception as e:
-                print(f"[EventBus] handler 异常 event={event}: {e}")
+                print(f"[EventBus] handler error event={event}: {e}")
 
     def clear(self) -> None:
         """清空所有订阅（切换剧本/重置时调用）。"""

@@ -37,7 +37,7 @@ class DirectorInput:
     def _build(self) -> ft.Control:
         self._hint = ft.Text("", size=TEXT_XS, color=ft.Colors.ON_SURFACE_VARIANT)
         self._field = ft.TextField(
-            hint_text="输入内容…",
+            hint_text="Type something...",
             multiline=False,
             dense=True,
             border_radius=RADIUS_PILL,
@@ -45,12 +45,12 @@ class DirectorInput:
             on_submit=lambda e: self._send(),
         )
         self._send_btn = ft.FilledButton(
-            content=ft.Text("发送"),
+            content=ft.Text("Send"),
             icon=ft.Icons.SEND,
             on_click=lambda e: self._send(),
         )
         self._skip_btn = ft.TextButton(
-            content=ft.Text("跳过"),
+            content=ft.Text("Skip"),
             icon=ft.Icons.SKIP_NEXT,
             on_click=lambda e: self._skip(),
             visible=False,
@@ -81,12 +81,12 @@ class DirectorInput:
     def show(self, mode: str):
         self.mode = mode
         if mode == "director":
-            self._hint.value = "导演提示 · 输入后会注入到对话"
-            self._field.hint_text = "如：突然有人敲门"
+            self._hint.value = "Director Hint · Will be injected into conversation"
+            self._field.hint_text = "e.g.: Someone suddenly knocked on the door"
             self._skip_btn.visible = False
         elif mode == "user":
-            self._hint.value = "轮到你了 · 输入发言或跳过"
-            self._field.hint_text = "说点什么…"
+            self._hint.value = "Your turn · Enter your message or skip"
+            self._field.hint_text = "Say something..."
             self._skip_btn.visible = True
         else:
             self.hide()
@@ -128,12 +128,12 @@ class DirectorInput:
             try:
                 self.state.loop.send_director_note(text)
             except Exception as ex:
-                print(f"[director_input] 发送导演提示失败: {ex}")
+                print(f"[director_input] Send director note failed: {ex}")
         elif self.mode == "user":
             try:
                 self.state.loop.send_user_message(text)
             except Exception as ex:
-                print(f"[director_input] 发送用户消息失败: {ex}")
+                print(f"[director_input] Send user message failed: {ex}")
         self._field.value = ""
         try:
             self.page.update()
@@ -146,7 +146,7 @@ class DirectorInput:
     def _show_sent_feedback(self):
         saved_hint = self._hint.value
         saved_color = self._hint.color
-        self._hint.value = "✓ 已发送"
+        self._hint.value = "✓ Sent"
         self._hint.color = ft.Colors.TERTIARY
         try:
             self.page.update()
@@ -187,6 +187,6 @@ class DirectorInput:
         try:
             self.state.loop.skip_user_turn()
         except Exception as ex:
-            print(f"[director_input] 跳过失败: {ex}")
+            print(f"[director_input] Skip failed: {ex}")
         self._field.value = ""
         self.hide()

@@ -139,7 +139,7 @@ def check_bus_leaks(bus, expected_event_count: int = 0):
     counts = bus_subscription_count(bus)
     total = sum(counts.values())
     if total > expected_event_count:
-        print(f"[debug:bus] 订阅泄漏？当前 {total} 个订阅: {dict(counts)}")
+        print(f"[debug:bus] Subscription leak? Current {total} subscriptions: {dict(counts)}")
         _print_stack(7)
 
 

@@ -28,7 +28,7 @@ class ViewBase:
     def build(self) -> ft.Control:
         return ft.Container(
             alignment=ft.Alignment.CENTER,
-            content=ft.Text("未实现", size=TEXT_ML),
+            content=ft.Text("Not Implemented", size=TEXT_ML),
             expand=True,
         )
 

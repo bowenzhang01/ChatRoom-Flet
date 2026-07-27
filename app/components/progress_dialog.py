@@ -86,7 +86,7 @@ class ProgressDialog:
                 self._step_controls.append(row)
                 self._steps_col.controls.append(row)
 
-        self._close_btn = ft.TextButton("关闭", on_click=lambda e: self.close(),
+        self._close_btn = ft.TextButton("Close", on_click=lambda e: self.close(),
                                         visible=False)
 
         content_controls = [self._status, self._progress]

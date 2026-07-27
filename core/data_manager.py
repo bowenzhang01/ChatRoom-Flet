@@ -72,9 +72,9 @@ class DataManager:
                 config.app_config["active_profile"] = default_name
                 save_json(config.BASE_DIR / "config.json", config.app_config)
 
-            print(f"[data] 已自动迁移数据到 profiles/{default_name}/")
+            print(f"[data] Data migrated to profiles/{default_name}/")
 
-    # ── Profile 加载 ──
+    # ── Profile Loading ──
 
     def load_profile(self, profile_name):
         """动态加载指定剧本的所有数据到 app 状态。"""
@@ -176,7 +176,7 @@ class DataManager:
                 return pn
         return display_name
 
-    # ── 数据 I/O（全部返回 bool，UI 层负责提示）──
+    # ── Data I/O (all return bool, UI layer handles messages) ──
 
     def _safe_write(self, path, data, desc=""):
         try:
@@ -184,7 +184,7 @@ class DataManager:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             return True
         except Exception as e:
-            print(f"[data] 保存失败 {desc}: {e}")
+            print(f"[data] Save failed {desc}: {e}")
             return False
 
     def _save_scenes(self):
@@ -259,7 +259,7 @@ class DataManager:
                     new_chars[c["name"]] = c
                 except Exception as e:
                     char_load_errors.append(f.name)
-                    print(f"[data] 角色加载失败 {f.name}: {e}")
+                    print(f"[data] Character load failed {f.name}: {e}")
         app._char_load_errors = char_load_errors
         for c in new_chars.values():
             new_styles[c["name"]] = {
@@ -273,8 +273,8 @@ class DataManager:
     # ── 剧本管理 ──
 
     def _make_safe_folder_name(self, display_name: str) -> str:
-        """中文显示名 → 安全英文文件夹名。ASCII 保留，其他用 md5 前 8 位。
-        冲突时自动追加 _2, _3 后缀。"""
+        """Display name → safe English folder name. ASCII preserved, others use md5 first 8 chars.
+        Auto-append _2, _3 suffixes on collision."""
         import hashlib
         safe = "".join(c for c in display_name if c.isascii() and (c.isalnum() or c == "_"))
         if safe and not safe[0].isdigit():
@@ -306,12 +306,12 @@ class DataManager:
         save_json(pdir / "scenes.json", [])
         save_json(pdir / "characters" / "You.json", {
             "name": "You",
-            "display_name": "你",
+            "display_name": "You",
             "color": "#42a5f5",
             "bg_color": "#f0f7ff",
-            "personality": "你自己",
-            "description": "就是你自己～一个和大家一起生活的普通人。",
-            "system_prompt": "你是这个世界的一员，和伙伴们自然地聊天。对话内容用直角引号「」包裹，动作描写用*星号*包裹，例如：*伸了个懒腰*、*笑着拍拍她的肩*。回复简短自然，100-200字。",
+            "personality": "Yourself",
+            "description": "Just being yourself — an ordinary person sharing life with everyone.",
+            "system_prompt": "You are part of this world, chatting naturally with your companions. Wrap dialogue in double quotes \"like this\", actions in *asterisks*, e.g.: *stretches*, *grins and pats her shoulder*. Keep replies short and natural, 100-200 words.",
         })
         return folder
 

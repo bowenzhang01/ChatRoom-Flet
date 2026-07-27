@@ -12,10 +12,10 @@ __all__ = ["ModeChips"]
 
 # (label, attr, config_key, icon)
 _MODES = [
-    ("导演", "director_mode", "director_mode", ft.Icons.MOVIE),
-    ("用户", "user_mode", "user_mode", ft.Icons.PERSON),
-    ("动态场景", "dynamic_scene_enabled", "dynamic_scene", ft.Icons.AUTO_AWESOME),
-    ("随机事件", "random_event_enabled", "random_event", ft.Icons.CASINO),
+    ("Director", "director_mode", "director_mode", ft.Icons.MOVIE),
+    ("User", "user_mode", "user_mode", ft.Icons.PERSON),
+    ("Dynamic Scene", "dynamic_scene_enabled", "dynamic_scene", ft.Icons.AUTO_AWESOME),
+    ("Random Event", "random_event_enabled", "random_event", ft.Icons.CASINO),
 ]
 
 
@@ -62,7 +62,7 @@ class ModeChips:
             try:
                 self.state.data._save_profile_config()
             except Exception as ex:
-                print(f"[mode_chips] 保存 {attr} 失败: {ex}")
+                print(f"[mode_chips] Save {attr} failed: {ex}")
             # 用户模式开关：自动加入 / 移除 You
             if attr == "user_mode":
                 if new_val:

@@ -81,7 +81,7 @@ class DialogueLoop:
             self._thread.join(timeout=10.0)
             if self._thread.is_alive():
                 print("[loop] start: orphan thread did not exit within 10s, aborting start")
-                self.bus.emit("api_error_stop", "上轮对话未完全停止，请稍后重试")
+                self.bus.emit("api_error_stop", "Previous conversation has not fully stopped, please retry later")
                 return
             self._thread = None
         else:
@@ -90,7 +90,7 @@ class DialogueLoop:
         # 检查 API Key
         import config
         if not config.API_KEY:
-            self.bus.emit("api_error_stop", "未配置 API Key，请在设置中填写")
+            self.bus.emit("api_error_stop", "API Key not configured, please fill in Settings")
             return
 
         # 初始化场景（动态模式从预设取首个场景）
@@ -118,7 +118,7 @@ class DialogueLoop:
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
         self.bus.emit("started", None)
-        self.bus.emit("set_status", "运行中")
+        self.bus.emit("set_status", "Running")
         validate_runtime_state(self.app)
 
     def pause(self):
@@ -132,7 +132,7 @@ class DialogueLoop:
         self.app.paused = True
         self._paused.clear()
         self.bus.emit("paused", None)
-        self.bus.emit("set_status", "已暂停")
+        self.bus.emit("set_status", "Paused")
         # 暂停时自动存档
         self.app.chat._auto_save()
         # 导演模式开启时，UI 层监听 paused 事件显示输入栏
@@ -145,14 +145,14 @@ class DialogueLoop:
             return
         if self._waiting_for_user:
             if "You" in self.app._get_effective_order():
-                self.bus.emit("set_status", "请先输入发言或跳过")
+                self.bus.emit("set_status", "Please send a message or skip")
                 return
             self._waiting_for_user = False
             self._user_turn_event.set()
         self.app.paused = False
         self._paused.set()
         self.bus.emit("resumed", None)
-        self.bus.emit("set_status", "运行中")
+        self.bus.emit("set_status", "Running")
 
     def stop(self):
         """停止对话（线程退出，清空历史）。
@@ -189,7 +189,7 @@ class DialogueLoop:
         self.app.chat._clear_autosave()  # 清除过期自动存档，避免下次启动弹出恢复提示
         self.bus.emit("stopped", None)
         validate_runtime_state(self.app)
-        self.bus.emit("set_status", "已停止")
+        self.bus.emit("set_status", "Stopped")
 
     def reset(self):
         """停止并清空对话历史（回到初始状态）。等同于 stop()。"""
@@ -213,7 +213,7 @@ class DialogueLoop:
             return
         entry = {
             "name": "__director__",
-            "display_name": "导演",
+            "display_name": "Director",
             "text": text,
             "time": datetime.now().strftime("%H:%M:%S"),
             "type": "director",
@@ -231,7 +231,7 @@ class DialogueLoop:
         uc = self.app.characters.get("You", {})
         entry = {
             "name": "You",
-            "display_name": uc.get("display_name", "你"),
+            "display_name": uc.get("display_name", "You"),
             "text": text,
             "time": datetime.now().strftime("%H:%M:%S"),
         }
@@ -264,7 +264,7 @@ class DialogueLoop:
         """对话主循环（后台线程）。"""
         # 按时间生成场景（scene_idx == -1 时在 loop 线程中生成，避免阻塞 UI）
         if self.app.scene_idx == -1 and not self.app.current_scene:
-            self.bus.emit("set_status", "正在生成场景...")
+            self.bus.emit("set_status", "Generating scene...")
             scene, err = self.ai.generate_time_scene_sync()
             if not self._stop_event.is_set() and scene:
                 self.app.current_scene = scene
@@ -275,7 +275,7 @@ class DialogueLoop:
                     "manual": True, "is_time_gen": True,
                 })
             elif err and not self._stop_event.is_set():
-                self.bus.emit("set_status", f"按时间生成场景失败: {err[:60]}")
+                self.bus.emit("set_status", f"Time-based scene generation failed: {err[:60]}")
                 self.app.scene_idx = 0
 
         current_thread = threading.current_thread()
@@ -298,7 +298,7 @@ class DialogueLoop:
                     if self._handle_npc_logic(current_thread):
                         continue
                     elif self._should_trigger_random():
-                        self.bus.emit("set_status", "正在生成随机事件...")
+                        self.bus.emit("set_status", "Generating random event...")
                         result = self.ai._generate_random_event()
                         if self._stop_event.is_set():
                             break
@@ -307,7 +307,7 @@ class DialogueLoop:
                         else:
                             print("[random_event] generation failed, skipping")
                             self.app._char_turns_since_event = 0
-                        self.bus.emit("set_status", "运行中")
+                        self.bus.emit("set_status", "Running")
                         time.sleep(0.2)
                         continue
 
@@ -332,7 +332,7 @@ class DialogueLoop:
                     self.app.paused = True
                     self._paused.clear()
                     self.bus.emit("user_turn", None)
-                    self.bus.emit("set_status", "轮到你了～")
+                    self.bus.emit("set_status", "Your turn~")
                     self._user_turn_event.wait()
                     self._user_turn_event.clear()
                     if self._stop_event.is_set():
@@ -340,7 +340,7 @@ class DialogueLoop:
                     self.app.paused = False
                     self._paused.set()
                     self.bus.emit("resumed", None)
-                    self.bus.emit("set_status", "运行中")
+                    self.bus.emit("set_status", "Running")
                     continue
 
                 # ═══ 调 LLM ═══
@@ -398,7 +398,7 @@ class DialogueLoop:
                                 self.bus.emit("api_error_stop", err_msg)
                                 self.stop()
                                 return
-                            self.bus.emit("set_status", f"API 错误: {error}")
+                            self.bus.emit("set_status", f"API error: {error}")
 
                         # 解析 [SCENE] / [NEXT] 标签
                         text = reply
@@ -433,7 +433,7 @@ class DialogueLoop:
                             self.bus.emit("api_error_stop", err_msg)
                             self.stop()
                             return
-                        self.bus.emit("set_status", f"API 错误: {error}")
+                        self.bus.emit("set_status", f"API error: {error}")
 
                     # 解析 [SCENE] / [NEXT] 标签
                     text = reply
@@ -474,7 +474,7 @@ class DialogueLoop:
                     elapsed += 0.1
 
             except Exception as e:
-                print(f"[loop] 异常: {e}")
+                print(f"[loop] Exception: {e}")
                 time.sleep(0.5)
 
     # ═══ 随机事件辅助 ═══
@@ -566,7 +566,7 @@ class DialogueLoop:
         # 检测角色是否提到 NPC
         if (last_msg and last_msg.get("type") not in ("random_npc", "random_event", "director")
                 and self.ai._npc_is_mentioned(last_text)):
-            self.bus.emit("set_status", f"路人\"{self.app._active_npc['name']}\"正在回应...")
+            self.bus.emit("set_status", f"Stranger \"{self.app._active_npc['name']}\" is responding...")
             self.app._npc_silent_turns = 0
             self.app._npc_rounds_left -= 1
             npc_name = self.app._active_npc["name"]
@@ -576,8 +576,8 @@ class DialogueLoop:
 
             if config.STREAMING_ENABLED:
                 def _departure_process(text):
-                    if "离开" not in text:
-                        return text + " *说完便转身离开了*"
+                    if "leave" not in text.lower():
+                        return text + " *turns and quietly leaves*"
                     return text
 
                 self._stream_npc_dialogue(
@@ -593,8 +593,8 @@ class DialogueLoop:
                 if self._stop_event.is_set():
                     return True
                 if npc_is_departing:
-                    if "离开" not in response:
-                        response = response + " *说完便转身离开了*"
+                    if "leave" not in response.lower():
+                        response = response + " *turns and quietly leaves*"
                 entry = {
                     "name": "__random__",
                     "display_name": npc_name,
@@ -606,7 +606,7 @@ class DialogueLoop:
                     entry["is_farewell"] = True
                 self._emit_npc_message(entry)
             if not self.paused:
-                self.bus.emit("set_status", "运行中")
+                self.bus.emit("set_status", "Running")
             time.sleep(0.15)
             return True
 
@@ -620,14 +620,14 @@ class DialogueLoop:
                 entry = {
                     "name": "__random__",
                     "display_name": npc_name,
-                    "text": f"*{npc_name} 见没人理会，默默离开了*",
+                    "text": f"*{npc_name} realizes nobody is paying attention and quietly leaves*",
                     "time": datetime.now().strftime("%H:%M:%S"),
                     "type": "random_npc",
                     "is_farewell": True,
                 }
                 self._emit_npc_message(entry)
                 if not self.paused:
-                    self.bus.emit("set_status", "运行中")
+                    self.bus.emit("set_status", "Running")
                 time.sleep(0.15)
                 return True
         return False
@@ -638,7 +638,7 @@ class DialogueLoop:
     def _emit_random_result(self, result: dict):
         """将 AI 生成的随机事件/NPC 结果发送到 UI。"""
         if result.get("type") == "npc":
-            npc_name = result.get("name", "路人")
+            npc_name = result.get("name", "Stranger")
             npc_desc = result.get("desc", "")
             self.app._active_npc = {"name": npc_name, "desc": npc_desc}
             self.app._npc_rounds_left = 2
@@ -668,7 +668,7 @@ class DialogueLoop:
             self.app._char_turns_since_event = 0
             entry = {
                 "name": "__random__",
-                "display_name": "随机事件",
+                "display_name": "Random Event",
                 "text": event_text,
                 "time": datetime.now().strftime("%H:%M:%S"),
                 "type": "random_event",
@@ -744,7 +744,7 @@ class DialogueLoop:
 
     def _on_manual_scene_switch(self):
         if self.app.scene_idx == -1:
-            print("[scene] switched to: 按时间")
+            print("[scene] switched to: time-based")
         elif self.app.dynamic_scene_enabled and self.app.running and self.app.scenes:
             s = self.app.scenes[self.app.scene_idx % len(self.app.scenes)]
             self.app.current_scene = {

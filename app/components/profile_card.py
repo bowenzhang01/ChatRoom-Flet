@@ -68,28 +68,28 @@ class ProfileCard:
 
         badges = ft.Row(
             controls=[
-                self._badge(f"{self.meta['char_count']} 角色"),
-                self._badge(f"{self.meta['scene_count']} 场景"),
+                self._badge(f"{self.meta['char_count']} characters"),
+                self._badge(f"{self.meta['scene_count']} scenes"),
             ],
             spacing=6,
         )
-        world_text = self.meta["world"] or "暂无世界观"
+        world_text = self.meta["world"] or "No world setting"
         world = ft.Text(
             world_text, size=11, color=ft.Colors.ON_SURFACE_VARIANT, max_lines=2,
             overflow=ft.TextOverflow.ELLIPSIS,
         )
         chats = ft.Text(
-            f"{self.meta['chat_count']} 个存档", size=11, color=ft.Colors.ON_SURFACE_VARIANT,
+            f"{self.meta['chat_count']} archives", size=11, color=ft.Colors.ON_SURFACE_VARIANT,
         )
 
         menu_items = [
-            ft.PopupMenuItem(content=ft.Text("重命名"), icon=ft.Icons.EDIT,
+            ft.PopupMenuItem(content=ft.Text("Rename"), icon=ft.Icons.EDIT,
                              on_click=lambda e: self._menu("rename")),
-            ft.PopupMenuItem(content=ft.Text("复制"), icon=ft.Icons.CONTENT_COPY,
+            ft.PopupMenuItem(content=ft.Text("Duplicate"), icon=ft.Icons.CONTENT_COPY,
                              on_click=lambda e: self._menu("duplicate")),
-            ft.PopupMenuItem(content=ft.Text("导出"), icon=ft.Icons.UPLOAD_FILE,
+            ft.PopupMenuItem(content=ft.Text("Export"), icon=ft.Icons.UPLOAD_FILE,
                              on_click=lambda e: self._menu("export")),
-            ft.PopupMenuItem(content=ft.Text("删除"), icon=ft.Icons.DELETE_OUTLINE,
+            ft.PopupMenuItem(content=ft.Text("Delete"), icon=ft.Icons.DELETE_OUTLINE,
                              on_click=lambda e: self._menu("delete")),
         ]
         menu_btn = ft.PopupMenuButton(

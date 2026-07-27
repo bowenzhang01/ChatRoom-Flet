@@ -167,7 +167,7 @@ class ChatManager:
         if not self.app.history:
             if show_feedback:
                 self.bus.emit("saved", {"title": "", "success": False,
-                                        "message": "没有对话内容可保存", "path": None})
+                                        "message": "No conversation to save", "path": None})
             return
 
         self._ensure_chats_dir()
@@ -212,7 +212,7 @@ class ChatManager:
                 self._clear_autosave(filepath.parent)
             if show_feedback:
                 self.bus.emit("saved", {"title": title, "success": True,
-                                        "message": "保存成功", "path": str(filepath)})
+                                        "message": "Saved successfully", "path": str(filepath)})
 
         self._generate_chat_title(_on_title_ready)
 
@@ -230,16 +230,16 @@ class ChatManager:
             if result and result.get("title"):
                 callback(result["title"].strip())
             else:
-                print(f"[chat] 标题 JSON 提取失败: {err}")
+                print(f"[chat] Title JSON extraction failed: {err}")
                 callback(self._fallback_chat_title())
 
         def _on_title_error(err):
-            print(f"[chat] 标题 API 异常: {err}")
+            print(f"[chat] Title API exception: {err}")
             callback(self._fallback_chat_title())
 
         call_chat_completion_async(
             messages=[
-                {"role": "system", "content": "你是一个对话标题生成器，只返回JSON。"},
+                {"role": "system", "content": "You are a conversation title generator. Return JSON only."},
                 {"role": "user", "content": prompt},
             ],
             temperature=0.7,
@@ -292,7 +292,7 @@ class ChatManager:
             filepath.unlink()
             return True
         except Exception as e:
-            print(f"[chat] 删除失败: {e}")
+            print(f"[chat] Delete failed: {e}")
             return False
 
     # ── 自动存档 ──
@@ -356,7 +356,7 @@ class ChatManager:
                 pass
             return
         self.bus.emit("autosave_prompt", {
-            "title": data.get("title", "自动存档"),
+            "title": data.get("title", "Auto-save"),
             "message_count": data.get("message_count", 0),
             "path": str(p),
         })

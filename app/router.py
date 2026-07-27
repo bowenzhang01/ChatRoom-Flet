@@ -17,10 +17,10 @@ __all__ = ["AppRouter", "NAV_ITEMS"]
 
 # ── 导航项 ──
 NAV_ITEMS = [
-    {"route": "/chat", "icon": ft.Icons.CHAT_BUBBLE_OUTLINE, "selected_icon": ft.Icons.CHAT_BUBBLE, "label": "聊天"},
-    {"route": "/profiles", "icon": ft.Icons.MENU_BOOK_OUTLINED, "selected_icon": ft.Icons.MENU_BOOK, "label": "剧本"},
-    {"route": "/archives", "icon": ft.Icons.FOLDER_OUTLINED, "selected_icon": ft.Icons.FOLDER, "label": "存档"},
-    {"route": "/settings", "icon": ft.Icons.SETTINGS_OUTLINED, "selected_icon": ft.Icons.SETTINGS, "label": "设置"},
+    {"route": "/chat", "icon": ft.Icons.CHAT_BUBBLE_OUTLINE, "selected_icon": ft.Icons.CHAT_BUBBLE, "label": "Chat"},
+    {"route": "/profiles", "icon": ft.Icons.MENU_BOOK_OUTLINED, "selected_icon": ft.Icons.MENU_BOOK, "label": "Profiles"},
+    {"route": "/archives", "icon": ft.Icons.FOLDER_OUTLINED, "selected_icon": ft.Icons.FOLDER, "label": "Archives"},
+    {"route": "/settings", "icon": ft.Icons.SETTINGS_OUTLINED, "selected_icon": ft.Icons.SETTINGS, "label": "Settings"},
 ]
 
 
@@ -150,7 +150,7 @@ class AppRouter:
                 try:
                     old.on_leave()
                 except Exception as ex:
-                    print(f"[router] on_leave {self._current_route} 异常: {ex}")
+                    print(f"[router] on_leave {self._current_route} error: {ex}")
         self._current_route = route
         self.ui.route = route
         idx = self._route_to_index(route)
@@ -165,7 +165,7 @@ class AppRouter:
             try:
                 view.on_enter()
             except Exception as ex:
-                print(f"[router] on_enter {route} 异常: {ex}")
+                print(f"[router] on_enter {route} error: {ex}")
         self.page.update()
 
     def _on_rail_change(self, e):
@@ -181,13 +181,13 @@ class AppRouter:
         desktop = self.ui.is_desktop(self.page)
         was_desktop = self._rail is not None
         if desktop != was_desktop:
-            # 重建壳
+            # Rebuild shell
             self.page.controls.clear()
             self._rail = None
             self._navbar = None
             self._build_shell()
             self.page.add(self._root)
-            # 重新应用当前路由
+            # Re-apply current route
             route = self.ui.route
             idx = self._route_to_index(route)
             if self._rail:
@@ -200,7 +200,7 @@ class AppRouter:
                 try:
                     view.on_enter()
                 except Exception as ex:
-                    print(f"[router] on_enter (resize) {route} 异常: {ex}")
+                    print(f"[router] on_enter (resize) {route} error: {ex}")
             self.page.update()
 
     # ═══ 主题刷新 ═══

@@ -16,7 +16,7 @@ from services.api_service import test_connection_async, fetch_models_async
 
 __all__ = ["SettingsView"]
 
-_THEME_LABELS = {"light": "浅色", "dark": "深色", "system": "跟随系统"}
+_THEME_LABELS = {"light": "Light", "dark": "Dark", "system": "Follow System"}
 _VERSION = "0.1.0-flet"
 
 
@@ -74,7 +74,7 @@ class SettingsView(ViewBase):
 
     def _build_title(self) -> ft.Control:
         return ft.Container(
-            content=ft.Text("设置", size=TEXT_XL, weight=ft.FontWeight.W_700),
+            content=ft.Text("Settings", size=TEXT_XL, weight=ft.FontWeight.W_700),
             padding=ft.Padding.symmetric(horizontal=16, vertical=12),
         )
 
@@ -103,22 +103,22 @@ class SettingsView(ViewBase):
         connected = bool(config.API_KEY)
 
         if ksrc == "env":
-            key_label_text = "API Key（来自环境变量 DEEPSEEK_API_KEY）"
-            key_hint = "由环境变量提供，无需在此填写"
+            key_label_text = "API Key (from env var DEEPSEEK_API_KEY)"
+            key_hint = "Provided by env variable, configured automatically"
             key_readonly = True
         else:
             key_label_text = "API Key"
             key_hint = ""
             key_readonly = False
 
-        self._base_field = ft.TextField(label="API 地址", value=config.API_BASE, dense=True)
+        self._base_field = ft.TextField(label="API URL", value=config.API_BASE, dense=True)
         self._key_field = ft.TextField(
             label=key_label_text, value=config.API_KEY, dense=True,
             password=True, can_reveal_password=True,
             read_only=key_readonly, hint_text=key_hint,
         )
         self._key_source_text = ft.Text(
-            "来源: 环境变量" if ksrc == "env" else ("来源: 配置文件" if ksrc == "file" else "未配置"),
+            "Source: Env Variable" if ksrc == "env" else ("Source: Config File" if ksrc == "file" else "Not configured"),
             size=TEXT_XS, color=ft.Colors.ON_SURFACE_VARIANT,
         )
 
@@ -128,7 +128,7 @@ class SettingsView(ViewBase):
             dense=True, expand=True,
         )
         refresh_btn = ft.IconButton(
-            icon=ft.Icons.REFRESH, tooltip="刷新模型列表",
+            icon=ft.Icons.REFRESH, tooltip="Refresh model list",
             on_click=lambda e: self._fetch_models(self._base_field.value, self._key_field.value),
         )
         self._temp_slider = ft.Slider(
@@ -151,14 +151,14 @@ class SettingsView(ViewBase):
         # SSL / 代理开关（解决 macOS 企业代理/WSL 代理环境 SSE 流式失败问题）
         network_cfg = config.app_config.get("network", {})
         self._ssl_sw = ft.Switch(
-            label="校验 SSL 证书",
+            label="Verify SSL",
             value=config.API_VERIFY_SSL,
-            tooltip="关闭可绕过自签证书错误（有安全风险，仅调试用）",
+            tooltip="Disable to bypass self-signed cert errors (security risk, debug only)",
         )
         self._proxy_sw = ft.Switch(
-            label="读取系统代理",
+            label="Use System Proxy",
             value=config.API_TRUST_ENV,
-            tooltip="关闭可绕过 macOS 系统代理/企业代理对 SSE 流式的干扰",
+            tooltip="Disable to bypass macOS system/corporate proxy interference with SSE streaming",
         )
         self._ssl_sw.on_change = lambda e: self._on_network_change()
         self._proxy_sw.on_change = lambda e: self._on_network_change()
@@ -174,7 +174,7 @@ class SettingsView(ViewBase):
                 elapsed = int((time.time() - t0) * 1000)
                 self._test_progress.visible = False
                 if ok:
-                    self._test_result.value = f"✓ 连接正常，延迟 {elapsed}ms"
+                    self._test_result.value = f"✓ Connected, latency {elapsed}ms"
                     self._test_result.color = ft.Colors.TERTIARY
                     self._api_status_dot.bgcolor = ft.Colors.TERTIARY
                 else:
@@ -210,41 +210,41 @@ class SettingsView(ViewBase):
             config.MAX_TOKENS = int(self._tokens_slider.value)
             self._api_status_dot.bgcolor = ft.Colors.TERTIARY if config.API_KEY else ft.Colors.OUTLINE
             self.page.update()
-            self._snack("已保存 API 配置")
+            self._snack("API configuration saved")
 
         env_tip = ft.Text(
-            "建议通过环境变量 DEEPSEEK_API_KEY 设置 Key，避免明文存储在配置文件中",
+            "Set DEEPSEEK_API_KEY env variable to avoid storing API key in config file",
             size=TEXT_XS, color=ft.Colors.ON_SURFACE_VARIANT, italic=True,
         )
         network_tip = ft.Text(
-            "若 macOS/WSL 下流式输出卡顿或超时，尝试关闭\"读取系统代理\"。",
+            "If SSE streaming lags/times out on macOS/WSL, try disabling \"Use System Proxy\".",
             size=TEXT_XS, color=ft.Colors.ON_SURFACE_VARIANT, italic=True,
         )
         return self._card("", [
-            ft.Row([ft.Text("API 配置", size=TEXT_ML, weight=ft.FontWeight.W_600),
+            ft.Row([ft.Text("API Config", size=TEXT_ML, weight=ft.FontWeight.W_600),
                     self._api_status_dot,
-                    ft.Text("已连接" if connected else "未配置", size=TEXT_XS,
+                    ft.Text("Connected" if connected else "Not configured", size=TEXT_XS,
                             color=ft.Colors.ON_SURFACE_VARIANT)], spacing=8),
             self._base_field,
             self._key_field,
             self._key_source_text,
             ft.Row([self._model_dd, refresh_btn], spacing=8,
                    vertical_alignment=ft.CrossAxisAlignment.CENTER),
-            ft.Text("温度", size=TEXT_SM, color=ft.Colors.ON_SURFACE_VARIANT),
+            ft.Text("Temperature", size=TEXT_SM, color=ft.Colors.ON_SURFACE_VARIANT),
             ft.Row([self._temp_slider, self._temp_value_text], spacing=8,
                    vertical_alignment=ft.CrossAxisAlignment.CENTER),
-            ft.Text("最大 tokens", size=TEXT_SM, color=ft.Colors.ON_SURFACE_VARIANT),
+            ft.Text("Max Tokens", size=TEXT_SM, color=ft.Colors.ON_SURFACE_VARIANT),
             ft.Row([self._tokens_slider, self._tokens_value_text], spacing=8,
                    vertical_alignment=ft.CrossAxisAlignment.CENTER),
             ft.Row([self._test_progress, self._test_result], spacing=8,
                    vertical_alignment=ft.CrossAxisAlignment.CENTER),
             ft.Row([
-                ft.OutlinedButton("测试连接", icon=ft.Icons.NETWORK_CHECK, on_click=_test),
-                ft.FilledButton("保存", icon=ft.Icons.SAVE, on_click=_save),
+                ft.OutlinedButton("Test Connection", icon=ft.Icons.NETWORK_CHECK, on_click=_test),
+                ft.FilledButton("Save", icon=ft.Icons.SAVE, on_click=_save),
             ], spacing=8),
             env_tip,
             ft.Divider(height=1),
-            ft.Text("网络", size=TEXT_SM, color=ft.Colors.ON_SURFACE_VARIANT),
+            ft.Text("Network", size=TEXT_SM, color=ft.Colors.ON_SURFACE_VARIANT),
             self._ssl_sw,
             self._proxy_sw,
             network_tip,
@@ -262,8 +262,8 @@ class SettingsView(ViewBase):
         except Exception:
             pass
         self._snack(
-            f"SSL 校验：{'开' if config.API_VERIFY_SSL else '关'} · "
-            f"系统代理：{'开' if config.API_TRUST_ENV else '关'}（下次请求生效）"
+            f"SSL Verify: {'ON' if config.API_VERIFY_SSL else 'OFF'} · "
+            f"System Proxy: {'ON' if config.API_TRUST_ENV else 'OFF'} (takes effect next request)"
         )
 
     def _on_temp_slider_change(self, e):
@@ -295,12 +295,12 @@ class SettingsView(ViewBase):
                 if config.MODEL in models:
                     self._model_dd.value = config.MODEL
                 self.page.update()
-                self._snack(f"获取到 {len(models)} 个模型")
+                self._snack(f"Fetched {len(models)} models")
             else:
-                self._snack("未获取到模型")
+                self._snack("No models fetched")
 
         def _on_error(msg):
-            self._snack("获取模型失败：" + str(msg)[:60])
+            self._snack("Fetch models failed: " + str(msg)[:60])
 
         fetch_models_async(_on_result, on_error=_on_error, api_key=key, api_base=base)
 
@@ -325,14 +325,14 @@ class SettingsView(ViewBase):
         )
         self._color_theme_dd = color_theme_dd
 
-        return self._card("外观", [
-            ft.Text("主题模式", size=TEXT_SM, color=ft.Colors.ON_SURFACE_VARIANT),
+        return self._card("Appearance", [
+            ft.Text("Theme Mode", size=TEXT_SM, color=ft.Colors.ON_SURFACE_VARIANT),
             seg,
             ft.Container(height=8),
-            ft.Text("色彩主题", size=TEXT_SM, color=ft.Colors.ON_SURFACE_VARIANT),
+            ft.Text("Color Theme", size=TEXT_SM, color=ft.Colors.ON_SURFACE_VARIANT),
             color_theme_dd,
             ft.Container(height=8),
-            ft.Text("字体大小", size=TEXT_SM, color=ft.Colors.ON_SURFACE_VARIANT),
+            ft.Text("Font Size", size=TEXT_SM, color=ft.Colors.ON_SURFACE_VARIANT),
             ft.SegmentedButton(
                 selected=[get_font_scale_key()],
                 segments=[ft.Segment(value=k, label=ft.Text(v, size=TEXT_SM))
@@ -340,7 +340,7 @@ class SettingsView(ViewBase):
                 allow_multiple_selection=False, allow_empty_selection=False,
                 on_change=self._on_font_scale_change,
             ),
-            ft.Text("调整后重启应用生效", size=TEXT_XS, color=ft.Colors.ON_SURFACE_VARIANT, italic=True),
+            ft.Text("Restart app to apply changes", size=TEXT_XS, color=ft.Colors.ON_SURFACE_VARIANT, italic=True),
         ])
 
     def _on_color_theme_change(self, e):
@@ -362,7 +362,7 @@ class SettingsView(ViewBase):
             self.state.data._save_config()
         except Exception:
             pass
-        self._snack(f"字体大小已设为「{FONT_SCALE_LABELS.get(key, key)}」，重启应用后生效")
+        self._snack(f"Font size set to \"{FONT_SCALE_LABELS.get(key, key)}\", restart app to apply")
 
     def _on_theme_change(self, e):
         sel = e.control.selected
@@ -376,10 +376,10 @@ class SettingsView(ViewBase):
     def _build_behavior_card(self) -> ft.Control:
         # 从当前剧本配置读取（而非全局 config.app_config）
         pc = self.state._profile_config.setdefault("app", {})
-        self._director_sw = ft.Switch(label="导演模式", value=self.state.director_mode)
-        self._user_sw = ft.Switch(label="用户模式", value=self.state.user_mode)
-        self._dynamic_sw = ft.Switch(label="动态场景", value=self.state.dynamic_scene_enabled)
-        self._random_sw = ft.Switch(label="随机事件", value=self.state.random_event_enabled)
+        self._director_sw = ft.Switch(label="Director Mode", value=self.state.director_mode)
+        self._user_sw = ft.Switch(label="User Mode", value=self.state.user_mode)
+        self._dynamic_sw = ft.Switch(label="Dynamic Scene", value=self.state.dynamic_scene_enabled)
+        self._random_sw = ft.Switch(label="Random Event", value=self.state.random_event_enabled)
 
         def _persist(e=None):
             pc = self.state._profile_config.setdefault("app", {})
@@ -413,26 +413,26 @@ class SettingsView(ViewBase):
 
         self._mode_dd = ft.Dropdown(
             value=self.state.mode if self.state.mode in ("round", "random", "dynamic") else "round",
-            options=[ft.dropdown.Option(v, text=l) for l, v in [("轮流", "round"), ("随机", "random"), ("动态", "dynamic")]],
+            options=[ft.dropdown.Option(v, text=l) for l, v in [("Round Robin", "round"), ("Random", "random"), ("Dynamic", "dynamic")]],
             dense=True, width=140,
             on_select=lambda e: self._save_default("default_mode", e.control.value),
         )
         self._speed_dd = ft.Dropdown(
             value=str(self.state.speed),
-            options=[ft.dropdown.Option(str(i), text=f"速度 {i}") for i in range(1, 11)],
+            options=[ft.dropdown.Option(str(i), text=f"Speed {i}") for i in range(1, 11)],
             dense=True, width=140,
             on_select=lambda e: self._save_default("default_speed", int(e.control.value)),
         )
-        self._streaming_sw = ft.Switch(label="流式输出", value=config.STREAMING_ENABLED)
+        self._streaming_sw = ft.Switch(label="Streaming", value=config.STREAMING_ENABLED)
         self._streaming_sw.on_change = self._on_streaming_change
-        return self._card("对话行为（当前剧本，立即生效）", [
+        return self._card("Conversation Behavior (current profile, takes effect immediately)", [
             self._director_sw, self._user_sw, self._dynamic_sw, self._random_sw,
             ft.Container(height=4),
             self._streaming_sw,
             ft.Container(height=4),
-            ft.Text("发言模式", size=TEXT_SM, color=ft.Colors.ON_SURFACE_VARIANT),
+            ft.Text("Turn Mode", size=TEXT_SM, color=ft.Colors.ON_SURFACE_VARIANT),
             self._mode_dd,
-            ft.Text("速度", size=TEXT_SM, color=ft.Colors.ON_SURFACE_VARIANT),
+            ft.Text("Speed", size=TEXT_SM, color=ft.Colors.ON_SURFACE_VARIANT),
             self._speed_dd,
         ])
 
@@ -462,18 +462,18 @@ class SettingsView(ViewBase):
 
     # ═══ 关于 ═══
     def _build_about_card(self) -> ft.Control:
-        theme_name = COLOR_THEMES.get(get_color_theme_key(), {}).get("name", "极光")
+        theme_name = COLOR_THEMES.get(get_color_theme_key(), {}).get("name", "Aurora")
         self._about_theme_text = ft.Text(theme_name, size=TEXT_SM)
-        return self._card("关于", [
-            ft.Row([ft.Text("版本", size=TEXT_SM, color=ft.Colors.ON_SURFACE_VARIANT),
+        return self._card("About", [
+            ft.Row([ft.Text("Version", size=TEXT_SM, color=ft.Colors.ON_SURFACE_VARIANT),
                     ft.Text(_VERSION, size=TEXT_SM)], spacing=12),
-            ft.Row([ft.Text("框架", size=TEXT_SM, color=ft.Colors.ON_SURFACE_VARIANT),
+            ft.Row([ft.Text("Framework", size=TEXT_SM, color=ft.Colors.ON_SURFACE_VARIANT),
                     ft.Text("Flet 0.86.0", size=TEXT_SM)], spacing=12),
-            ft.Row([ft.Text("主题", size=TEXT_SM, color=ft.Colors.ON_SURFACE_VARIANT),
+            ft.Row([ft.Text("Theme", size=TEXT_SM, color=ft.Colors.ON_SURFACE_VARIANT),
                     self._about_theme_text], spacing=12),
             ft.Container(height=4),
-            ft.Text("问题反馈：请在项目仓库提交 Issue", size=TEXT_XS, color=ft.Colors.ON_SURFACE_VARIANT),
-            ft.Text("许可证：MIT", size=TEXT_XS, color=ft.Colors.ON_SURFACE_VARIANT),
+            ft.Text("Feedback: Please submit an issue on the project repository", size=TEXT_XS, color=ft.Colors.ON_SURFACE_VARIANT),
+            ft.Text("License: MIT", size=TEXT_XS, color=ft.Colors.ON_SURFACE_VARIANT),
         ])
 
     # ═══ 工具 ═══
@@ -496,7 +496,7 @@ class SettingsView(ViewBase):
                 try:
                     self.state.load_profile_for_edit(active)
                 except Exception as ex:
-                    print(f"[settings] on_enter load_profile_for_edit 失败: {ex}")
+                    print(f"[settings] on_enter load_profile_for_edit failed: {ex}")
         self._sync_api_fields()
         self._render_behavior()
         if self._color_theme_dd:
@@ -530,15 +530,15 @@ class SettingsView(ViewBase):
             if ksrc == "env":
                 self._key_field.value = config.API_KEY
                 self._key_field.read_only = True
-                self._key_field.label = "API Key（来自环境变量）"
-                self._key_field.hint_text = "由环境变量提供，无需在此填写"
+                self._key_field.label = "API Key (from env var)"
+                self._key_field.hint_text = "Provided by env variable, configured automatically"
             else:
                 self._key_field.value = config.API_KEY
                 self._key_field.read_only = False
                 self._key_field.label = "API Key"
                 self._key_field.hint_text = ""
             self._key_source_text.value = (
-                "来源: 环境变量" if ksrc == "env" else ("来源: 配置文件" if ksrc == "file" else "未配置")
+                "Source: Env Variable" if ksrc == "env" else ("Source: Config File" if ksrc == "file" else "Not configured")
             )
         if self._model_dd:
             if config.MODEL not in [o.key for o in (self._model_dd.options or [])]:

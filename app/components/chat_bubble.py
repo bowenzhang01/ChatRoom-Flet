@@ -181,30 +181,30 @@ def _avatar(initial: str, color: str, radius: int = 16) -> ft.CircleAvatar:
 
 
 def make_bubble_row(entry: dict, state, max_width: float) -> ft.Control:
-    """根据 entry.type 渲染气泡行。"""
+    """Render bubble row based on entry.type."""
     msg_type = entry.get("type")
     name = entry.get("name", "")
     dname = entry.get("display_name", name)
     text = entry.get("text", "")
     t = entry.get("time", "")
 
-    # ── 随机事件：居中分割线 ──
+    # ── Random Event: centered divider ──
     if msg_type == "random_event":
         return make_random_event_row(entry, max_width)
 
-    # ── 路人 NPC：左对齐 amber 头像 + "路人" tag ──
+    # ── Passerby NPC: left-aligned amber avatar + "Stranger" tag ──
     if msg_type == "random_npc":
         return _make_npc_row(entry, max_width)
 
-    # ── 导演：右对齐 amber ──
+    # ── Director: right-aligned amber ──
     if msg_type == "director":
         return _make_director_row(entry, max_width)
 
-    # ── 用户角色 You：右对齐 primary ──
+    # ── User character You: right-aligned primary ──
     if name == "You":
         return _make_user_row(entry, max_width)
 
-    # ── 普通 AI：左对齐 ──
+    # ── Normal AI: left-aligned ──
     return _make_ai_row(entry, state, max_width)
 
 
@@ -241,10 +241,10 @@ def _make_ai_row(entry, state, max_width) -> ft.Control:
 
 
 def _make_user_row(entry, max_width) -> ft.Control:
-    dname = entry.get("display_name", "你")
+    dname = entry.get("display_name", "You")
     text = entry.get("text", "")
     t = entry.get("time", "")
-    initial = (dname or "你")[0]
+    initial = (dname or "You")[0]
 
     avatar = _avatar(initial, ft.Colors.PRIMARY)
     name_row = ft.Row(
@@ -268,12 +268,12 @@ def _make_user_row(entry, max_width) -> ft.Control:
 def _make_director_row(entry, max_width) -> ft.Control:
     text = entry.get("text", "")
     t = entry.get("time", "")
-    avatar = _avatar("导", ft.Colors.SECONDARY)
+    avatar = _avatar("D", ft.Colors.SECONDARY)
     name_row = ft.Row(
         controls=[
             ft.Text(t, size=TEXT_XS, color=ft.Colors.ON_SURFACE_VARIANT),
-            _tag("导演", ft.Colors.SECONDARY_CONTAINER, ft.Colors.ON_SECONDARY_CONTAINER),
-            ft.Text("导演", size=TEXT_SM, weight=ft.FontWeight.W_600, color=ft.Colors.SECONDARY),
+            _tag("Director", ft.Colors.SECONDARY_CONTAINER, ft.Colors.ON_SECONDARY_CONTAINER),
+            ft.Text("Director", size=TEXT_SM, weight=ft.FontWeight.W_600, color=ft.Colors.SECONDARY),
         ],
         alignment=ft.MainAxisAlignment.END,
         spacing=6,
@@ -289,7 +289,7 @@ def _make_director_row(entry, max_width) -> ft.Control:
 
 
 def _make_npc_row(entry, max_width) -> ft.Control:
-    dname = entry.get("display_name", "路人")
+    dname = entry.get("display_name", "Stranger")
     text = entry.get("text", "")
     t = entry.get("time", "")
     is_farewell = entry.get("is_farewell", False)
@@ -299,7 +299,7 @@ def _make_npc_row(entry, max_width) -> ft.Control:
     name_row = ft.Row(
         controls=[
             ft.Text(dname, size=TEXT_SM, weight=ft.FontWeight.W_600, color=ft.Colors.SECONDARY),
-            _tag("路人", ft.Colors.SECONDARY_CONTAINER, ft.Colors.ON_SECONDARY_CONTAINER),
+            _tag("Stranger", ft.Colors.SECONDARY_CONTAINER, ft.Colors.ON_SECONDARY_CONTAINER),
             ft.Text(t, size=TEXT_XS, color=ft.Colors.ON_SURFACE_VARIANT),
         ],
         spacing=6,
@@ -323,7 +323,7 @@ def make_random_event_row(entry, max_width) -> ft.Control:
     divider_row = ft.Row(
         controls=[
             ft.Divider(expand=True, height=1),
-            ft.Text("🎲 随机事件", size=TEXT_XS, italic=True, color=ft.Colors.ON_SURFACE_VARIANT),
+            ft.Text("🎲 Random Event", size=TEXT_XS, italic=True, color=ft.Colors.ON_SURFACE_VARIANT),
             ft.Divider(expand=True, height=1),
         ],
         spacing=8,
@@ -342,7 +342,7 @@ def make_random_event_row(entry, max_width) -> ft.Control:
 
 def make_scene_change_row(scene: dict, max_width) -> ft.Control:
     """场景切换内联分割行（Step 5 的 banner 另做）。"""
-    label = "📍 场景切换"
+    label = "📍 Scene Change"
     desc = f"{scene.get('time', '')} · {scene.get('location', '')}".strip(" ·")
     divider_row = ft.Row(
         controls=[

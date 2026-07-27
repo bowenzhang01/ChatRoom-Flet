@@ -41,7 +41,7 @@ class ArchivesView(ViewBase):
             padding=ft.Padding.symmetric(horizontal=16, vertical=12),
         )
         self._search_field = ft.TextField(
-            hint_text="搜索…", dense=True, border_radius=20,
+            hint_text="Search...", dense=True, border_radius=20,
             suffix=ft.Icon(ft.Icons.SEARCH, size=16),
             on_change=lambda e: self._render(),
             on_submit=lambda e: self._render(),
@@ -79,12 +79,12 @@ class ArchivesView(ViewBase):
             self._header_container.content = ft.Row(
                 controls=[
                     ft.TextButton(
-                        content=ft.Text("← 返回"),
+                        content=ft.Text("← Back"),
                         on_click=lambda e: self._back_to_list(),
                     ),
                     ft.Column(
                         controls=[
-                            ft.Text("对话存档", size=TEXT_XL, weight=ft.FontWeight.W_700,
+                            ft.Text("Conversation Archives", size=TEXT_XL, weight=ft.FontWeight.W_700,
                                     max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
                             ft.Text(title, size=TEXT_SM, color=ft.Colors.ON_SURFACE_VARIANT,
                                     max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
@@ -100,20 +100,20 @@ class ArchivesView(ViewBase):
                 controls=[
                     ft.Column(
                         controls=[
-                            ft.Text("对话存档", size=TEXT_XL, weight=ft.FontWeight.W_700,
+                            ft.Text("Conversation Archives", size=TEXT_XL, weight=ft.FontWeight.W_700,
                                     max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
-                            ft.Text("选择剧本查看存档", size=TEXT_SM,
+                            ft.Text("Select a profile to view archives", size=TEXT_SM,
                                     color=ft.Colors.ON_SURFACE_VARIANT,
                                     max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
                         ],
                         spacing=0, tight=True, expand=True,
                     ),
                     ft.FilledTonalButton(
-                        content=ft.Text("保存当前"), icon=ft.Icons.SAVE,
+                        content=ft.Text("Save Current"), icon=ft.Icons.SAVE,
                         on_click=lambda e: self._save_current(),
                     ),
                     ft.OutlinedButton(
-                        content=ft.Text("复制全部"), icon=ft.Icons.CONTENT_COPY,
+                        content=ft.Text("Copy All"), icon=ft.Icons.CONTENT_COPY,
                         on_click=lambda e: self._copy_all(),
                     ),
                 ],
@@ -131,7 +131,7 @@ class ArchivesView(ViewBase):
                         query in p.lower() or
                         query in gather_profile_meta(p)["title"].lower()]
         if not profiles:
-            return self._empty_hint("暂无剧本", "请先在剧本库中创建剧本")
+            return self._empty_hint("No profiles", "Please create a profile in Profile Library first")
         items = []
         for folder in profiles:
             meta = gather_profile_meta(folder)
@@ -149,8 +149,8 @@ class ArchivesView(ViewBase):
                                 ft.Text(meta["title"], size=TEXT_ML, weight=ft.FontWeight.W_500,
                                         max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
                                 ft.Text(
-                                    f"{meta['chat_count']} 个存档"
-                                    + (" · 当前剧本" if is_active else ""),
+                                    f"{meta['chat_count']} archives"
+                                    + (" · Current Profile" if is_active else ""),
                                     size=TEXT_SM, color=ft.Colors.ON_SURFACE_VARIANT,
                                     max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
                                 ),
@@ -196,7 +196,7 @@ class ArchivesView(ViewBase):
         if query:
             chats = [(p, m) for p, m in chats if query in m.get("title", "").lower()]
         if not chats:
-            return self._empty_hint("暂无存档", "开始对话后点击「保存当前」即可存档")
+            return self._empty_hint("No archives", "Start a conversation then tap \"Save Current\" to archive")
 
         autosaves = [(p, m) for p, m in chats if m.get("is_autosave")]
         normal = [(p, m) for p, m in chats if not m.get("is_autosave")]
@@ -204,7 +204,7 @@ class ArchivesView(ViewBase):
 
         controls = []
         if autosaves:
-            controls.append(self._date_header("自动存档"))
+            controls.append(self._date_header("Auto-save"))
             for p, m in autosaves:
                 controls.append(self._autosave_tile(p, m, folder))
         for label, items in groups:
@@ -243,25 +243,25 @@ class ArchivesView(ViewBase):
             except Exception:
                 d = None
             if d == today:
-                label = "今天"
+                label = "Today"
             elif d == yesterday:
-                label = "昨天"
+                label = "Yesterday"
             elif d is not None:
                 label = created[:10]
             else:
-                label = "更早"
+                label = "Earlier"
             if label not in groups:
                 groups[label] = []
                 order.append(label)
             groups[label].append((p, m))
         def _sort_key(l):
-            if l == "今天": return (0, "")
-            if l == "昨天": return (1, "")
+            if l == "Today": return (0, "")
+            if l == "Yesterday": return (1, "")
             return (2, l)
         order.sort(key=_sort_key, reverse=False)
-        dated = [l for l in order if l not in ("今天", "昨天")]
+        dated = [l for l in order if l not in ("Today", "Yesterday")]
         dated.sort(reverse=True)
-        final = [l for l in order if l in ("今天", "昨天")] + dated
+        final = [l for l in order if l in ("Today", "Yesterday")] + dated
         return [(l, groups[l]) for l in final]
 
     def _date_header(self, label: str) -> ft.Control:
@@ -291,19 +291,19 @@ class ArchivesView(ViewBase):
                                     overflow=ft.TextOverflow.ELLIPSIS),
                             ft.Text(preview, size=TEXT_XS, color=ft.Colors.ON_SURFACE_VARIANT, max_lines=1,
                                     overflow=ft.TextOverflow.ELLIPSIS),
-                            ft.Text(f"{count} 条 · {created}", size=TEXT_XS,
+                            ft.Text(f"{count} msgs · {created}", size=TEXT_XS,
                                     color=ft.Colors.ON_SURFACE_VARIANT),
                         ],
                         spacing=2, tight=True, expand=True,
                     ),
-                    ft.FilledTonalButton(content=ft.Text("读取"),
+                    ft.FilledTonalButton(content=ft.Text("Load"),
                                          on_click=lambda e: self._load(path, folder)),
                     ft.PopupMenuButton(
                         icon=ft.Icons.MORE_VERT,
                         items=[
-                            ft.PopupMenuItem(content=ft.Text("重命名"), icon=ft.Icons.EDIT,
+                            ft.PopupMenuItem(content=ft.Text("Rename"), icon=ft.Icons.EDIT,
                                              on_click=lambda e: self._rename(path, title)),
-                            ft.PopupMenuItem(content=ft.Text("删除"), icon=ft.Icons.DELETE_OUTLINE,
+                            ft.PopupMenuItem(content=ft.Text("Delete"), icon=ft.Icons.DELETE_OUTLINE,
                                              on_click=lambda e: self._delete(path, title)),
                         ],
                     ),
@@ -327,7 +327,7 @@ class ArchivesView(ViewBase):
                         controls=[
                             ft.Row(
                                 controls=[
-                                    ft.Text("自动存档", size=TEXT_MD, weight=ft.FontWeight.W_600,
+                                    ft.Text("Auto-save", size=TEXT_MD, weight=ft.FontWeight.W_600,
                                             color=ft.Colors.ON_SECONDARY_CONTAINER),
                                     ft.Container(
                                         content=ft.Text("⚡", size=TEXT_XS),
@@ -340,14 +340,14 @@ class ArchivesView(ViewBase):
                             ),
                             ft.Text(preview, size=TEXT_XS, color=ft.Colors.ON_SURFACE_VARIANT, max_lines=1,
                                     overflow=ft.TextOverflow.ELLIPSIS),
-                            ft.Text(f"{count} 条 · 上次未保存", size=TEXT_XS,
+                            ft.Text(f"{count} msgs · Last unsaved", size=TEXT_XS,
                                     color=ft.Colors.ON_SURFACE_VARIANT),
                         ],
                         spacing=2, tight=True, expand=True,
                     ),
-                    ft.FilledTonalButton(content=ft.Text("读取"),
+                    ft.FilledTonalButton(content=ft.Text("Load"),
                                          on_click=lambda e: self._load(path, folder)),
-                    ft.TextButton(content=ft.Text("放弃"), on_click=lambda e: self._discard(path)),
+                    ft.TextButton(content=ft.Text("Discard"), on_click=lambda e: self._discard(path)),
                 ],
                 spacing=10,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -376,7 +376,7 @@ class ArchivesView(ViewBase):
         if self._saving:
             return
         if not self.state.history:
-            self._snack("没有对话内容可保存")
+            self._snack("No conversation content to save")
             return
         self._saving = True
         self._save_completed = False
@@ -384,13 +384,13 @@ class ArchivesView(ViewBase):
         self._save_generation += 1  # 新保存代际
         my_gen = self._save_generation  # 捕获本次保存的代际令牌
         # 显示保存进度对话框
-        self._save_dialog = ProgressDialog(self.page, title="💾 保存对话")
+        self._save_dialog = ProgressDialog(self.page, title="💾 Save Conversation")
         self._save_dialog.show(
-            status="正在写入对话数据…",
-            steps=["写入对话数据", "生成对话标题", "完成"],
+            status="Writing conversation data...",
+            steps=["Write conversation data", "Generate conversation title", "Complete"],
             indeterminate=True,
         )
-        self._save_dialog.set_step(0, "正在写入对话数据…")
+        self._save_dialog.set_step(0, "Writing conversation data...")
         # 订阅保存事件
         self.state.bus.on("saving", self._on_saving)
         self.state.bus.on("saved", self._on_saved)
@@ -405,7 +405,7 @@ class ArchivesView(ViewBase):
                 return
             self._save_timed_out = True
             if self._save_dialog and not self._save_completed:
-                self._save_dialog.fail("保存超时，请重试")
+                self._save_dialog.fail("Save timed out, please retry")
             _t.sleep(30)
             if my_gen != self._save_generation:
                 return
@@ -420,14 +420,14 @@ class ArchivesView(ViewBase):
             if my_gen != self._save_generation:
                 return  # 已被新保存取代
             if self._save_dialog:
-                self._save_dialog.fail("保存失败：" + str(ex)[:60])
+                self._save_dialog.fail("Save failed: " + str(ex)[:60])
             self._save_dialog = None
             self._saving = False
             self._unsubscribe_save_events()
 
     def _on_saving(self, _data):
         if self._save_dialog:
-            self._save_dialog.set_step(1, "正在生成对话标题…", delay=0.1)
+            self._save_dialog.set_step(1, "Generating conversation title...", delay=0.1)
 
     def _on_saved(self, data: dict):
         # 代际校验：若期间用户开了新保存，旧 saved 事件放弃操作（避免覆盖新对话框）
@@ -437,23 +437,23 @@ class ArchivesView(ViewBase):
         if self._save_completed:
             return  # 本代际已处理过 saved
         ok = data.get("success", False) if isinstance(data, dict) else False
-        msg = data.get("message", "保存成功" if ok else "保存失败") if isinstance(data, dict) else "保存完成"
+        msg = data.get("message", "Save succeeded" if ok else "Save failed") if isinstance(data, dict) else "Save completed"
         title = data.get("title", "") if isinstance(data, dict) else ""
         self._save_completed = True
         self._saving = False
         if self._save_dialog:
             if ok:
-                summary = f"保存成功（延迟）：{title}" if self._save_timed_out and title else (
-                    "保存成功（延迟）" if self._save_timed_out else
-                    (f"保存成功：{title}" if title else "保存成功")
+                summary = f"Save succeeded (delayed): {title}" if self._save_timed_out and title else (
+                    "Save succeeded (delayed)" if self._save_timed_out else
+                    (f"Save succeeded: {title}" if title else "Save succeeded")
                 )
-                self._save_dialog.set_step(2, "完成", delay=0.1)
+                self._save_dialog.set_step(2, "Complete", delay=0.1)
                 self._save_dialog.complete(summary, on_close=self._after_save_closed)
             else:
                 self._save_dialog.fail(msg)
         else:
             if self._save_timed_out:
-                self._snack(f"保存成功（延迟）：{title}" if title else "保存成功（延迟）")
+                self._snack(f"Save succeeded (delayed): {title}" if title else "Save succeeded (delayed)")
             else:
                 self._snack(msg)
         self._unsubscribe_save_events()
@@ -485,20 +485,20 @@ class ArchivesView(ViewBase):
                 ok = self.state.chat.load_chat(Path(path))
             except Exception as ex:
                 self._close_dialog()
-                self._snack("读取失败：" + str(ex)[:60])
+                self._snack("Load failed: " + str(ex)[:60])
                 return
             self._close_dialog()
             if ok:
-                self._snack("已读取")
+                self._snack("Loaded")
                 # chat_view 的 on_leave 已设 _dirty=True，
                 # navigate 回 chat 时 on_enter 会自动重灌 history
                 self.router.navigate("/chat")
         dlg = ft.AlertDialog(
-            title=ft.Text("读取对话"),
-            content=ft.Text("将覆盖当前对话并切换到该剧本，确定读取？"),
+            title=ft.Text("Load Chat"),
+            content=ft.Text("This will overwrite the current conversation and switch profiles. Continue?"),
             actions=[
-                ft.TextButton("取消", on_click=lambda e: self._close_dialog()),
-                ft.FilledButton("读取", on_click=_ok),
+                ft.TextButton("Cancel", on_click=lambda e: self._close_dialog()),
+                ft.FilledButton("Load", on_click=_ok),
             ],
         )
         self.page.show_dialog(dlg)
@@ -512,11 +512,11 @@ class ArchivesView(ViewBase):
             self._close_dialog()
             self._render()
         dlg = ft.AlertDialog(
-            title=ft.Text("放弃自动存档"),
-            content=ft.Text("确定放弃该自动存档？内容将被永久删除。"),
+            title=ft.Text("Discard Auto-save"),
+            content=ft.Text("Discard this auto-save? Content will be permanently deleted."),
             actions=[
-                ft.TextButton("取消", on_click=lambda e: self._close_dialog()),
-                ft.FilledButton("放弃", on_click=_ok),
+                ft.TextButton("Cancel", on_click=lambda e: self._close_dialog()),
+                ft.FilledButton("Discard", on_click=_ok),
             ],
         )
         self.page.show_dialog(dlg)
@@ -530,17 +530,17 @@ class ArchivesView(ViewBase):
             self._close_dialog()
             self._render()
         dlg = ft.AlertDialog(
-            title=ft.Text("删除存档"),
-            content=ft.Text(f"确定删除「{title}」？"),
+            title=ft.Text("Delete Archive"),
+            content=ft.Text(f"Confirm delete archive \"{title}\"?"),
             actions=[
-                ft.TextButton("取消", on_click=lambda e: self._close_dialog()),
-                ft.FilledButton("删除", on_click=_ok),
+                ft.TextButton("Cancel", on_click=lambda e: self._close_dialog()),
+                ft.FilledButton("Delete", on_click=_ok),
             ],
         )
         self.page.show_dialog(dlg)
 
     def _rename(self, path, old_title):
-        field = ft.TextField(label="新标题", value=old_title, autofocus=True)
+        field = ft.TextField(label="New Title", value=old_title, autofocus=True)
         def _ok(e=None):
             try:
                 from utils import load_json, save_json
@@ -553,11 +553,11 @@ class ArchivesView(ViewBase):
             self._close_dialog()
             self._render()
         dlg = ft.AlertDialog(
-            title=ft.Text("重命名存档"),
+            title=ft.Text("Rename Archive"),
             content=field,
             actions=[
-                ft.TextButton("取消", on_click=lambda e: self._close_dialog()),
-                ft.FilledButton("保存", on_click=_ok),
+                ft.TextButton("Cancel", on_click=lambda e: self._close_dialog()),
+                ft.FilledButton("Save", on_click=_ok),
             ],
         )
         self.page.show_dialog(dlg)
@@ -567,13 +567,13 @@ class ArchivesView(ViewBase):
         if self._selected_folder and self._selected_folder != active:
             chats = self.state.chat.list_chats_for_profile(self._selected_folder)
             if not chats:
-                self._snack("该剧本无对话存档可复制")
+                self._snack("No chat archives to copy for this profile")
                 return
             from utils import load_json
             data = load_json(Path(chats[0][0]))
             hist = data.get("history", []) if data else []
             if not hist:
-                self._snack("该存档无对话内容")
+                self._snack("No conversation content in this archive")
                 return
             lines = []
             for entry in hist:
@@ -584,7 +584,7 @@ class ArchivesView(ViewBase):
             text = "\n\n".join(lines)
         else:
             if not self.state.history:
-                self._snack("当前无对话内容可复制")
+                self._snack("No conversation content to copy")
                 return
             lines = []
             for entry in self.state.history:
@@ -595,9 +595,9 @@ class ArchivesView(ViewBase):
             text = "\n\n".join(lines)
         try:
             self.page.clipboard.set(text)
-            self._snack("已复制全部对话")
+            self._snack("All conversations copied to clipboard")
         except Exception:
-            self._snack("复制失败")
+            self._snack("Copy failed")
 
     # ═══ 工具 ═══
     def _close_dialog(self):

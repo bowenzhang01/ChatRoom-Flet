@@ -12,7 +12,7 @@ from app.theme import char_color_at, RADIUS_PILL, TEXT_SM, TEXT_XS
 
 __all__ = ["TurnOrderEditor"]
 
-_MODES = [("轮流", "round"), ("随机", "random"), ("动态", "dynamic")]
+_MODES = [("Round-Robin", "round"), ("Random", "random"), ("Dynamic", "dynamic")]
 
 
 class TurnOrderEditor:
@@ -34,10 +34,10 @@ class TurnOrderEditor:
         return ft.Column(
             controls=[
                 ft.Container(height=4),
-                ft.Text("参与对话", size=TEXT_SM, weight=ft.FontWeight.W_600, color=ft.Colors.ON_SURFACE_VARIANT),
+                ft.Text("In Conversation", size=TEXT_SM, weight=ft.FontWeight.W_600, color=ft.Colors.ON_SURFACE_VARIANT),
                 self._active_col,
                 ft.Container(height=4),
-                ft.Text("待命角色（点击加入）", size=TEXT_SM, weight=ft.FontWeight.W_600,
+                ft.Text("Standby (tap to add)", size=TEXT_SM, weight=ft.FontWeight.W_600,
                         color=ft.Colors.ON_SURFACE_VARIANT),
                 self._standby_row,
             ],
@@ -74,7 +74,7 @@ class TurnOrderEditor:
         order = set(self.state.turn_order)
         standby = [n for n in self.state.characters if n not in order and n != "You"]
         if not standby:
-            self._standby_row.controls = [ft.Text("无", size=TEXT_XS, color=ft.Colors.ON_SURFACE_VARIANT)]
+            self._standby_row.controls = [ft.Text("None", size=TEXT_XS, color=ft.Colors.ON_SURFACE_VARIANT)]
             return
         chips = []
         for n in standby:
@@ -112,7 +112,7 @@ class TurnOrderEditor:
         if not is_you:
             trailing = ft.IconButton(
                 icon=ft.Icons.CLOSE, icon_size=16,
-                tooltip="移除",
+                tooltip="Remove",
                 on_click=self._make_remove(name),
             )
 
@@ -158,7 +158,7 @@ class TurnOrderEditor:
             content=ft.Row(
                 controls=[
                     ft.Icon(ft.Icons.LOCK, size=16, color=ft.Colors.ON_SURFACE_VARIANT),
-                    ft.Text("你（用户模式自动加入）", size=TEXT_SM, color=ft.Colors.ON_SURFACE_VARIANT),
+                    ft.Text("You (auto-joined in user mode)", size=TEXT_SM, color=ft.Colors.ON_SURFACE_VARIANT),
                 ],
                 spacing=8,
             ),

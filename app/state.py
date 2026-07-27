@@ -7,7 +7,7 @@ ChatRoom - Flet Edition · UI 反应式状态
 
 import flet as ft
 
-from app.theme import THEME_MODES, set_color_theme
+from app.theme import THEME_MODES, set_color_theme, _LEGACY_COLOR_THEME_KEY
 
 __all__ = ["UIState"]
 
@@ -37,7 +37,8 @@ class UIState:
         import config
         ui = config.app_config.setdefault("ui", {})
         self.theme_mode_key = ui.get("theme_mode", "system")
-        self.color_theme_key = ui.get("color_theme", "aurora")
+        raw_color = ui.get("color_theme", "aurora")
+        self.color_theme_key = _LEGACY_COLOR_THEME_KEY.get(raw_color, raw_color)
         set_color_theme(self.color_theme_key)
 
     def save_theme_mode(self):

@@ -1,0 +1,12 @@
+  serious_python:
+      name: serious_python
+  serious_python_android:
+      name: serious_python_android
+  serious_python_darwin:
+      name: serious_python_darwin
+  serious_python_linux:
+      name: serious_python_linux
+  serious_python_platform_interface:
+      name: serious_python_platform_interface
+  serious_python_windows:
+      name: serious_python_windows

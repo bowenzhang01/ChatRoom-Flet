@@ -11,9 +11,9 @@ from app.theme import COLORS, RADIUS_PILL, TEXT_SM
 __all__ = ["TransportBar"]
 
 _MODES = [
-    ("轮流", "round"),
-    ("随机", "random"),
-    ("动态", "dynamic"),
+    ("Round-Robin", "round"),
+    ("Random", "random"),
+    ("Dynamic", "dynamic"),
 ]
 
 
@@ -56,7 +56,7 @@ class TransportBar:
             selected_icon=ft.Icons.PAUSE,
             selected=False,
             icon_size=22,
-            tooltip="开始 / 暂停",
+            tooltip="Start / Pause",
             on_click=self._on_play_click,
             style=ft.ButtonStyle(
                 bgcolor=ft.Colors.PRIMARY,
@@ -66,13 +66,13 @@ class TransportBar:
         self._stop_btn = ft.IconButton(
             icon=ft.Icons.STOP_CIRCLE_OUTLINED,
             icon_size=22,
-            tooltip="停止",
+            tooltip="Stop",
             on_click=self._on_stop_click,
         )
         self._save_btn = ft.IconButton(
             icon=ft.Icons.SAVE_OUTLINED,
             icon_size=20,
-            tooltip="保存当前对话",
+            tooltip="Save conversation",
             on_click=self._on_save_click,
             visible=False,
         )

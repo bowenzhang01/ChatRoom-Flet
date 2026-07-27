@@ -81,14 +81,25 @@ _TEXT_BASE = {
 }
 
 FONT_SCALE_MAP = {"small": 0.85, "medium": 1.0, "large": 1.15}
-FONT_SCALE_LABELS = {"small": "小", "medium": "中", "large": "大"}
+FONT_SCALE_LABELS = {"small": "S", "medium": "M", "large": "L"}
 _DEFAULT_FONT_SCALE_KEY = "medium"
+
+# Backward-compat: map old Chinese keys to new English ones
+_LEGACY_FONT_SCALE_KEY = {"小": "small", "中": "medium", "大": "large"}
+
+# Backward-compat: map old Chinese color theme names to new English ones
+_LEGACY_COLOR_THEME_KEY = {
+    "赤霞": "crimson", "暮光": "twilight", "金穗": "golden",
+    "翠微": "emerald", "海天": "ocean", "碧落": "azure",
+    "极光": "aurora", "星夜": "starry", "虹光": "rainbow",
+}
 
 
 def get_font_scale_key() -> str:
-    """返回当前 config 中保存的字体缩放键（small/medium/large）。"""
+    """Return the font scale key saved in config (small/medium/large)."""
     try:
-        return config.app_config.get("ui", {}).get("font_scale", _DEFAULT_FONT_SCALE_KEY)
+        key = config.app_config.get("ui", {}).get("font_scale", _DEFAULT_FONT_SCALE_KEY)
+        return _LEGACY_FONT_SCALE_KEY.get(key, key)
     except Exception:
         return _DEFAULT_FONT_SCALE_KEY
 
@@ -154,7 +165,7 @@ COLOR_THEMES: dict[str, dict] = {}
 
 # ── 主题 1：极光 Aurora · 青蓝→紫（原默认主题）──
 COLOR_THEMES["aurora"] = {
-    "name": "极光",
+    "name": "Aurora",
     "seed_light": ft.Colors.BLUE,
     "seed_dark": ft.Colors.INDIGO,
     "gradient_band": [
@@ -207,7 +218,7 @@ COLOR_THEMES["aurora"] = {
 
 # ── 主题 2：暮光 Dusk · 紫红→橙黄 ──
 COLOR_THEMES["dusk"] = {
-    "name": "暮光",
+    "name": "Twilight",
     "seed_light": ft.Colors.DEEP_ORANGE,
     "seed_dark": ft.Colors.ORANGE,
     "gradient_band": [
@@ -261,7 +272,7 @@ COLOR_THEMES["dusk"] = {
 
 # ── 主题 3：海天 Ocean · 橙黄→蓝绿 ──
 COLOR_THEMES["ocean"] = {
-    "name": "海天",
+    "name": "Ocean",
     "seed_light": ft.Colors.TEAL,
     "seed_dark": ft.Colors.CYAN,
     "gradient_band": [
@@ -315,7 +326,7 @@ COLOR_THEMES["ocean"] = {
 
 # ── 主题 4：星夜 Star · 蓝紫→紫红 ──
 COLOR_THEMES["star"] = {
-    "name": "星夜",
+    "name": "Starry",
     "seed_light": ft.Colors.DEEP_PURPLE,
     "seed_dark": ft.Colors.INDIGO,
     "gradient_band": [
@@ -369,7 +380,7 @@ COLOR_THEMES["star"] = {
 
 # ── 主题 5：赤霞 Crimson · 赤红→玫红 ──
 COLOR_THEMES["crimson"] = {
-    "name": "赤霞",
+    "name": "Crimson",
     "seed_light": ft.Colors.RED,
     "seed_dark": ft.Colors.PINK,
     "gradient_band": [
@@ -422,7 +433,7 @@ COLOR_THEMES["crimson"] = {
 
 # ── 主题 6：金穗 Golden · 金黄→暖橙 ──
 COLOR_THEMES["golden"] = {
-    "name": "金穗",
+    "name": "Amber",
     "seed_light": ft.Colors.AMBER,
     "seed_dark": ft.Colors.YELLOW,
     "gradient_band": [
@@ -475,7 +486,7 @@ COLOR_THEMES["golden"] = {
 
 # ── 主题 7：翠微 Jade · 青绿→翠绿 ──
 COLOR_THEMES["jade"] = {
-    "name": "翠微",
+    "name": "Emerald",
     "seed_light": ft.Colors.GREEN,
     "seed_dark": ft.Colors.LIGHT_GREEN,
     "gradient_band": [
@@ -529,7 +540,7 @@ COLOR_THEMES["jade"] = {
 
 # ── 主题 8：碧落 Sky · 天青→海蓝 ──
 COLOR_THEMES["sky"] = {
-    "name": "碧落",
+    "name": "Azure",
     "seed_light": ft.Colors.CYAN,
     "seed_dark": ft.Colors.BLUE,
     "gradient_band": [
@@ -582,7 +593,7 @@ COLOR_THEMES["sky"] = {
 
 # ── 主题 9：虹光 Rainbow · 全光谱 ──
 COLOR_THEMES["rainbow"] = {
-    "name": "虹光",
+    "name": "Rainbow",
     "seed_light": ft.Colors.PINK,
     "seed_dark": ft.Colors.DEEP_PURPLE,
     "gradient_band": [
@@ -713,27 +724,27 @@ _CHAR_COLOR_END = 0.70
 
 # ═══ 主题 → (关键词组, emoji, 渐变起点t, 渐变跨度) ═══
 _THEME_DEFS = [
-    (("寝室","宿舍","日常","校园","生活","学校","学生","dorm","life","室友","同桌"), "🏠",   0.00, 0.35),
-    (("魔法","奇幻","巫师","咒语","妖精","精灵","魔","magic","fantasy","witch","fairy"), "🪄",   0.20, 0.50),
-    (("星","飞船","太空","科幻","宇宙","星际","银河","外星","star","ship","space","alien","planet"), "🚀",   0.45, 0.55),
-    (("武","江湖","侠","功夫","门派","剑","sword","kungfu","martial"), "⚔️",   0.00, 0.25),
-    (("恐怖","惊悚","黑暗","吸血鬼","怪物","鬼","horror","zombie","dark","haunt","cursed"), "🕯️",   0.60, 0.40),
-    (("末日","废土","幸存","丧尸","wasteland","apocalypse","survival"), "🏚️",   0.75, 0.25),
-    (("冒险","勇者","探险","西部","沙漠","遗迹","寻宝","adventure","quest","ruins","treasure"), "🗺️",   0.80, 0.20),
-    (("恋爱","浪漫","甜","爱情","甜蜜","约会","romance","love","couple","date","heart"), "💕",   0.65, 0.30),
-    (("古装","宫廷","古风","修仙","ancient","皇帝","皇朝","朝代","剑仙","仙侠","宫"), "🏮",   0.90, 0.10),
-    (("都市","办公室","公司","职场","modern","office","city","白领","上班"), "🏙️",   0.25, 0.28),
-    (("侦探","推理","mystery","案件","破案","crime","罪案","线索"), "🔍",   0.35, 0.20),
-    (("田园","乡村","农场","旅行","自然","森林","山","海","nature","forest","farm","trip"), "🌿",   0.05, 0.20),
-    (("历史","战争","革命","帝国","王朝","history","war","empire","dynasty","起义"), "📜",   0.88, 0.12),
-    (("医院","医生","医疗","护士","急诊","病人","medical","clinic","patient","病房"), "🏥",   0.12, 0.20),
-    (("音乐","乐队","歌","演奏","演唱会","乐器","music","band","rock","jazz","pop"), "🎵",   0.55, 0.30),
-    (("运动","体育","篮球","足球","比赛","竞技","球","sports","match","race","game"), "⚽",   0.35, 0.40),
-    (("美食","料理","餐厅","甜点","咖啡","烘焙","food","cook","bake","chef","kitchen"), "🍳",   0.82, 0.18),
-    (("悬疑","惊悚","thriller","suspense","紧张","谜团"), "👁️",   0.42, 0.18),
-    (("神话","传说","龙","神","myth","legend","dragon","god","deity"), "🐉",   0.75, 0.20),
-    (("海盗","船","航海","海洋","pirate","sail","ocean","sea"), "⚓",   0.30, 0.35),
-    (("蒸汽","机械","齿轮","steam","punk","gear","mecha","robot"), "⚙️",   0.50, 0.30),
+    (("dorm","dormitory","daily","campus","life","school","student","roommate","deskmate"), "🏠",   0.00, 0.35),
+    (("magic","fantasy","wizard","spell","fairy","elf","witch"), "🪄",   0.20, 0.50),
+    (("star","spaceship","space","sci-fi","interstellar","galaxy","alien","ship","planet"), "🚀",   0.45, 0.55),
+    (("martial","jianghu","hero","kungfu","clan","sword"), "⚔️",   0.00, 0.25),
+    (("horror","thriller","dark","vampire","monster","ghost","zombie","haunt","cursed"), "🕯️",   0.60, 0.40),
+    (("apocalypse","wasteland","survival","zombie"), "🏚️",   0.75, 0.25),
+    (("adventure","hero","explore","western","desert","ruins","treasure","quest"), "🗺️",   0.80, 0.20),
+    (("romance","romantic","sweet","love","date","couple","heart"), "💕",   0.65, 0.30),
+    (("ancient","palace","classical","cultivation","emperor","dynasty","swordsman","xianxia"), "🏮",   0.90, 0.10),
+    (("urban","office","workplace","modern","city","white-collar","work"), "🏙️",   0.25, 0.28),
+    (("detective","deduction","mystery","case","solve","crime","clue"), "🔍",   0.35, 0.20),
+    (("pastoral","village","farm","travel","nature","forest","mountain","sea","trip"), "🌿",   0.05, 0.20),
+    (("history","war","revolution","empire","dynasty","rebellion"), "📜",   0.88, 0.12),
+    (("hospital","doctor","medical","nurse","emergency","patient","clinic","ward"), "🏥",   0.12, 0.20),
+    (("music","band","song","perform","concert","instrument","rock","jazz","pop"), "🎵",   0.55, 0.30),
+    (("sports","basketball","soccer","match","competition","ball","race","game"), "⚽",   0.35, 0.40),
+    (("food","cuisine","restaurant","dessert","coffee","bake","cook","chef","kitchen"), "🍳",   0.82, 0.18),
+    (("mystery","thriller","suspense","tense","enigma"), "👁️",   0.42, 0.18),
+    (("myth","legend","dragon","god","deity"), "🐉",   0.75, 0.20),
+    (("pirate","ship","sail","ocean","sea"), "⚓",   0.30, 0.35),
+    (("steam","mechanical","gear","punk","mecha","robot"), "⚙️",   0.50, 0.30),
 ]
 
 

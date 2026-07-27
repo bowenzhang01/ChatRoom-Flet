@@ -53,7 +53,7 @@ def main(page: ft.Page):
         try:
             app_state.check_autosave_on_start()
         except Exception as e:
-            print(f"[startup] check_autosave 失败: {e}")
+            print(f"[startup] check_autosave failed: {e}")
 
     threading.Thread(target=_delayed_autosave_check, daemon=True).start()
 

@@ -20,7 +20,7 @@ def load_json(path, default=None):
         with open(p, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception as e:
-        print(f"[load_json] 读取失败 {p}: {e}")
+        print(f"[load_json] Read failed {p}: {e}")
         return default
 
 
@@ -33,7 +33,7 @@ def save_json(path, data):
             json.dump(data, f, ensure_ascii=False, indent=2)
         return True
     except Exception as e:
-        print(f"[save_json] 保存失败 {p}: {e}")
+        print(f"[save_json] Save failed {p}: {e}")
         return False
 
 
@@ -84,12 +84,12 @@ def extract_json(text: str):
     返回 (dict|list|None, error_msg|None)
     """
     if not text or not text.strip():
-        return None, "AI返回为空"
-    # Step 0: 移除 DeepSeek R1 等模型的 <think>...</think> 思考标签
+        return None, "AI returned empty response"
+    # Step 0: Remove <think>...</think> tags from models like DeepSeek R1
     text = _re.sub(r'<think>[\s\S]*?</think>', '', text)
     text = text.strip()
     if not text:
-        return None, "AI返回为空（仅含思考标签）"
+        return None, "AI returned empty (only think tags)"
 
     # Step 1: 提取 markdown 代码块
     m = _re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, _re.DOTALL)
@@ -137,7 +137,7 @@ def extract_json(text: str):
                 if result is not None:
                     return result, None
 
-    return None, "JSON解析失败"
+    return None, "JSON parse failed"
 
 
 def _try_parse_json(text: str):
