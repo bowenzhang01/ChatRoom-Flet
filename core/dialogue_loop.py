@@ -207,10 +207,19 @@ class DialogueLoop:
     # ═══ 用户输入 ═══
 
     def send_director_note(self, text: str):
-        """注入导演提示（直接追加到 history 并发事件）。"""
+        """注入导演提示（直接追加到 history 并发事件）。
+        支持 [IMAGE:prompt] 标签，触发图像生成。"""
         text = text.strip()
         if not text:
             return
+
+        image_prompt = None
+        if self.app.image_gen_enabled:
+            text, image_prompt = self.app.ai._parse_and_strip_image_tag(text)
+            if image_prompt:
+                if not text:
+                    text = "（导演请求生成插画）"
+
         entry = {
             "name": "__director__",
             "display_name": "导演",
@@ -221,6 +230,9 @@ class DialogueLoop:
         with self.app._history_lock:
             self.app.history.append(entry)
         self.bus.emit("msg", entry)
+
+        if image_prompt and self._should_trigger_char_image():
+            self._do_image_generation(image_prompt, source="char")
 
     def send_user_message(self, text: str):
         """注入用户角色发言（在用户回合时调用，解除阻塞）。"""
@@ -386,6 +398,7 @@ class DialogueLoop:
                             last_flush = now
 
                     text = ""
+                    image_prompt = None
                     try:
                         reply, error = self.ai._call_llm_stream(name, on_token)
 
@@ -400,7 +413,7 @@ class DialogueLoop:
                                 return
                             self.bus.emit("set_status", f"API 错误: {error}")
 
-                        # 解析 [SCENE] / [NEXT] 标签
+                        # 解析 [SCENE] / [NEXT] / [IMAGE] 标签
                         text = reply
                         if self.app.dynamic_scene_enabled:
                             text, scene_dict = self.ai._parse_and_strip_scene_tag(text)
@@ -413,12 +426,18 @@ class DialogueLoop:
                         else:
                             self.app._suggested_next = None
 
+                        if self.app.image_gen_enabled:
+                            text, image_prompt = self.ai._parse_and_strip_image_tag(text)
+
                         text = text.strip()
                     finally:
                         entry["streaming"] = False
                         if text:
                             entry["text"] = text
                         self.bus.emit("msg_end", dict(entry))
+
+                    if self.app.image_gen_enabled and image_prompt and self._should_trigger_char_image():
+                        self._do_image_generation(image_prompt, source="char", character=name)
 
                 else:
                     # ── 非流式路径（原有逻辑）──
@@ -435,7 +454,7 @@ class DialogueLoop:
                             return
                         self.bus.emit("set_status", f"API 错误: {error}")
 
-                    # 解析 [SCENE] / [NEXT] 标签
+                    # 解析 [SCENE] / [NEXT] / [IMAGE] 标签
                     text = reply
                     if self.app.dynamic_scene_enabled:
                         text, scene_dict = self.ai._parse_and_strip_scene_tag(text)
@@ -447,6 +466,10 @@ class DialogueLoop:
                         self.app._suggested_next = next_name
                     else:
                         self.app._suggested_next = None
+
+                    image_prompt = None
+                    if self.app.image_gen_enabled:
+                        text, image_prompt = self.ai._parse_and_strip_image_tag(text)
 
                     entry = {
                         "name": name,
@@ -464,6 +487,9 @@ class DialogueLoop:
                     self.app.message_count += 1
                     self.bus.emit("msg", entry)
 
+                    if self.app.image_gen_enabled and image_prompt and self._should_trigger_char_image():
+                        self._do_image_generation(image_prompt, source="char", character=name)
+
                 # 等待（速度控制），每 0.1s 检查暂停
                 total = self.app.speed * 0.1
                 elapsed = 0.0
@@ -472,6 +498,14 @@ class DialogueLoop:
                     if not self._paused.is_set():
                         break
                     elapsed += 0.1
+
+                # 自动图像生成检查
+                self.app._auto_image_counter += 1
+                if self._should_trigger_auto_image():
+                    result = self.app.image_gen._build_auto_prompt()
+                    if result:
+                        image_prompt, summary = result
+                        self._do_image_generation(image_prompt, source="auto", summary=summary)
 
             except Exception as e:
                 print(f"[loop] 异常: {e}")
@@ -714,6 +748,74 @@ class DialogueLoop:
             "mood": self.app.current_scene.get("mood", ""),
             "version": self.app.scene_version,
         })
+
+    # ═══ 图像生成 ═══
+
+    def _should_trigger_auto_image(self) -> bool:
+        if not self.app.image_gen_enabled:
+            return False
+        if self.app.image_gen_auto_interval <= 0:
+            return False
+        if not self.app.image_gen.ready:
+            return False
+        turns_since = (self.app.turn_count - self.app._last_image_turn
+                       if self.app._last_image_turn >= 0 else 999)
+        return turns_since >= self.app.image_gen_auto_interval
+
+    def _should_trigger_char_image(self) -> bool:
+        if not self.app.image_gen_enabled:
+            return False
+        if self.app.image_gen_char_cooldown <= 0:
+            return False
+        if not self.app.image_gen.ready:
+            return False
+        turns_since = (self.app.turn_count - self.app._last_image_turn
+                       if self.app._last_image_turn >= 0 else 999)
+        cooldown = max(self.app.image_gen_char_cooldown, 2)
+        return turns_since >= cooldown
+
+    def _do_image_generation(self, prompt: str, source: str = "auto",
+                             character: str = None, summary: str = ""):
+        if not prompt:
+            return
+        images_dir = self.app.chat.active_images_dir
+        if images_dir is None:
+            self.bus.emit("image_error", "无法确定图片存储目录")
+            return
+        images_dir.mkdir(parents=True, exist_ok=True)
+        self.bus.emit("set_status", "🎨 正在生成插画...")
+        info = self.app.image_gen.generate(
+            prompt=prompt,
+            chat_images_dir=images_dir,
+            source=source,
+            character=character,
+        )
+        if info:
+            thumb_full = str(images_dir / info["thumb_path"])
+            image_full = str(images_dir / info["image_path"])
+            display_text = summary if summary else prompt[:80]
+            entry = {
+                "name": "__image__",
+                "display_name": info["display_name"],
+                "type": "image",
+                "image_source": info["source"],
+                "image_path": image_full,
+                "thumb_path": thumb_full,
+                "prompt": info["prompt"],
+                "text": display_text,
+                "character": info.get("character"),
+                "time": datetime.now().strftime("%H:%M:%S"),
+            }
+            with self.app._history_lock:
+                self.app.history.append(entry)
+            self.app.turn_count += 1
+            self.app.message_count += 1
+            self.app._last_image_turn = self.app.turn_count
+            self.app._auto_image_counter = 0
+            self.bus.emit("image_done", entry)
+        else:
+            self.bus.emit("image_error", "生成失败")
+        self.bus.emit("set_status", "运行中")
 
     # ═══ 场景手动切换（UI 调用）═══
 

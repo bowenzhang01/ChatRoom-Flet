@@ -1,23 +1,43 @@
 # -*- coding: utf-8 -*-
 """
 ChatRoom - Flet Edition · 对话存档管理器
-  迁移自 Kivy 版 core/chat_manager.py，零 UI 框架依赖。
-  - 业务逻辑（存档读写 / AI 标题生成 / 自动存档 / 启动恢复检测）保留
-  - 所有 UI 弹窗代码删除（保存中/保存成功/恢复询问）
-    改由 EventBus 通知 UI 层：
-      "saving"          → 正在保存（UI 显示进度）
-      "saved"           → 保存完成 (val={title, success, path})
-      "autosave_prompt" → 启动时检测到自动存档 (val={title, message_count, path})
+   迁移自 Kivy 版 core/chat_manager.py，零 UI 框架依赖。
+   - 业务逻辑（存档读写 / AI 标题生成 / 自动存档 / 启动恢复检测）保留
+   - 所有 UI 弹窗代码删除（保存中/保存成功/恢复询问）
+     改由 EventBus 通知 UI 层：
+       "saving"          → 正在保存（UI 显示进度）
+       "saved"           → 保存完成 (val={title, success, path})
+       "autosave_prompt" → 启动时检测到自动存档 (val={title, message_count, path})
+
+   v2 文件夹格式：每个存档是一个目录，内含 chat.json + images/
+     向后兼容旧的单文件 .json 存档（只读，下次保存自动迁移）。
 """
 
 import re
+import shutil
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 import config
 from utils import load_json, save_json, extract_json
 from services.api_service import call_chat_completion_async
+
+
+def _resolve_chat_json(chat_path: Path) -> Path:
+    """解析存档路径，返回 chat.json 的实际文件路径。
+
+    - 新格式（目录）：chat_path 是目录 → chat_path/chat.json
+    - 旧格式（文件）：chat_path 是 .json 文件 → chat_path 本身
+    """
+    if chat_path.is_dir():
+        return chat_path / "chat.json"
+    return chat_path
+
+
+def _is_legacy_format(chat_path: Path) -> bool:
+    return chat_path.is_file() and chat_path.suffix == ".json"
 
 
 class ChatManager:
@@ -25,19 +45,14 @@ class ChatManager:
 
     def __init__(self, app):
         self.app = app
-        self.bus = app.bus  # 事件总线引用
-        self._loaded_chat_path = None   # 记录加载的对话路径，保存时覆盖
-        self._last_save_time = 0.0      # 上次保存时间戳
-        self._last_autosave_len = 0     # 上次自动存档时的消息数
-        self._last_saved_count = -1     # 上次保存（手动或自动）时的消息数；-1=从未保存
+        self.bus = app.bus
+        self._loaded_chat_path = None   # 目录路径（新格式）或 None（新对话）
+        self._last_save_time = 0.0
+        self._last_autosave_len = 0
+        self._last_saved_count = -1
 
     @property
     def chats_dir(self) -> Path:
-        """当前活跃剧本的对话存档目录。
-
-        始终基于 active_profile（而非可能被 load_profile_for_edit 临时切换的
-        profile_dir），确保保存/自动存档始终写入活跃剧本的存档目录。
-        """
         active = config.app_config.get("active_profile", "")
         if active:
             return config.PROFILES_DIR / active / "chats"
@@ -47,91 +62,154 @@ class ChatManager:
         if self.chats_dir and not self.chats_dir.exists():
             self.chats_dir.mkdir(parents=True, exist_ok=True)
 
+    @property
+    def active_images_dir(self) -> Optional[Path]:
+        """当前对话会话的图像目录。优先加载档目录，否则用 _active/ 临时目录。"""
+        if self._loaded_chat_path is not None:
+            return self._loaded_chat_path / "images"
+        if self.chats_dir is None:
+            return None
+        self._ensure_chats_dir()
+        active_dir = self.chats_dir / "_active"
+        active_dir.mkdir(parents=True, exist_ok=True)
+        return active_dir / "images"
+
+    def chat_images_dir(self, chat_path: Optional[Path] = None) -> Optional[Path]:
+        """获取某存档目录下的 images/ 目录路径。
+
+        若未传 chat_path，用当前加载的存档目录。
+        """
+        if chat_path is None:
+            chat_path = self._loaded_chat_path
+        if chat_path is None:
+            return None
+        if _is_legacy_format(chat_path):
+            return chat_path.parent / "images"
+        return chat_path / "images"
+
     # ── 列表与元信息 ──
 
-    def _list_chat_files(self):
-        """列出对话文件，按文件名时间戳倒序（新的在前）"""
+    def _list_chat_dirs(self):
+        """列出新格式存档目录 + 旧格式 .json 文件，按时间戳倒序。"""
         if not self.chats_dir or not self.chats_dir.exists():
             return []
-        files = list(self.chats_dir.glob("chat_*.json"))
-        def _sort_key(fp):
-            m = re.search(r'chat_(\d{8}_\d{6})', fp.name)
+
+        results = []
+        seen = set()
+
+        for entry in sorted(self.chats_dir.iterdir(), key=lambda e: e.name, reverse=True):
+            if entry.name.startswith(".") or entry.name == "_autosave":
+                continue
+            if entry.is_dir():
+                json_path = entry / "chat.json"
+                if json_path.exists():
+                    results.append(entry)
+                    seen.add(entry.name)
+            elif entry.is_file() and entry.suffix == ".json":
+                name = entry.stem
+                if name not in seen:
+                    results.append(entry)
+
+        def _sort_key(p):
+            m = re.search(r'chat_(\d{8}_\d{6})', p.name)
             return m.group(1) if m else "00000000_000000"
-        files.sort(key=_sort_key, reverse=True)
-        return files
+        results.sort(key=_sort_key, reverse=True)
+        return results
 
     def list_autosave(self):
-        """获取自动存档路径（若存在且非空）"""
+        """获取自动存档路径（若存在且非空）。"""
         if not self.chats_dir:
             return None
-        p = self.chats_dir / "_autosave.json"
-        if p.exists():
-            data = load_json(p)
+        # 新格式
+        new_path = self.chats_dir / "_autosave"
+        if new_path.is_dir():
+            json_path = new_path / "chat.json"
+            if json_path.exists():
+                data = load_json(json_path)
+                if data and data.get("history"):
+                    return new_path
+        # 旧格式
+        old_path = self.chats_dir / "_autosave.json"
+        if old_path.exists():
+            data = load_json(old_path)
             if data and data.get("history"):
-                return p
+                return old_path
         return None
 
-    def _read_chat_meta(self, filepath):
-        """读取对话文件的元信息（title, message_count, created_at）"""
+    def _read_chat_meta(self, chat_path):
+        """读取存档的元信息（title, message_count, created_at）。"""
         try:
-            data = load_json(filepath)
+            data = load_json(_resolve_chat_json(chat_path))
             if not data:
                 return None
+            is_autosave = chat_path.name in ("_autosave", "_autosave.json")
             return {
-                "title": data.get("title", filepath.stem),
+                "title": data.get("title", chat_path.stem),
                 "message_count": data.get("message_count", 0),
                 "created_at": data.get("created_at", ""),
-                "is_autosave": filepath.name == "_autosave.json",
+                "is_autosave": is_autosave,
             }
         except Exception:
             return None
 
     def list_chats_with_meta(self):
-        """列出所有对话存档（含元信息）。返回 [(path, meta), ...]"""
         result = []
-        # 自动存档置顶
         autosave = self.list_autosave()
         if autosave:
             meta = self._read_chat_meta(autosave)
             if meta:
                 result.append((autosave, meta))
-        # 普通存档
-        for fp in self._list_chat_files():
-            meta = self._read_chat_meta(fp)
+        for p in self._list_chat_dirs():
+            meta = self._read_chat_meta(p)
             if meta:
-                result.append((fp, meta))
+                result.append((p, meta))
         return result
 
     def list_chats_for_profile(self, folder: str):
-        """列出指定剧本的对话存档（不切换活跃剧本）。返回 [(path, meta), ...]"""
         chats_dir = config.PROFILES_DIR / folder / "chats"
         if not chats_dir.exists():
             return []
+
         result = []
-        # 自动存档
-        auto = chats_dir / "_autosave.json"
-        if auto.exists():
-            data = load_json(auto)
+        auto = chats_dir / "_autosave"
+        if auto.is_dir() and (auto / "chat.json").exists():
+            data = load_json(auto / "chat.json")
             if data and data.get("history"):
                 meta = self._read_chat_meta(auto)
                 if meta:
                     result.append((auto, meta))
-        # 普通存档
-        files = list(chats_dir.glob("chat_*.json"))
-        def _sort_key(fp):
-            m = re.search(r'chat_(\d{8}_\d{6})', fp.name)
-            return m.group(1) if m else "00000000_000000"
-        files.sort(key=_sort_key, reverse=True)
-        for fp in files:
-            meta = self._read_chat_meta(fp)
-            if meta:
-                result.append((fp, meta))
+        auto_old = chats_dir / "_autosave.json"
+        if auto_old.exists():
+            data = load_json(auto_old)
+            if data and data.get("history"):
+                meta = self._read_chat_meta(auto_old)
+                if meta:
+                    result.append((auto_old, meta))
+
+        entries = sorted(chats_dir.iterdir(), key=lambda e: e.name, reverse=True)
+        seen = set()
+        for entry in entries:
+            if entry.name.startswith(".") or entry.name == "_autosave":
+                continue
+            if entry.is_dir():
+                if (entry / "chat.json").exists():
+                    meta = self._read_chat_meta(entry)
+                    if meta:
+                        result.append((entry, meta))
+                    seen.add(entry.name)
+            elif entry.is_file() and entry.suffix == ".json":
+                if entry.stem not in seen:
+                    meta = self._read_chat_meta(entry)
+                    if meta:
+                        result.append((entry, meta))
+
         return result
 
     # ── 保存 ──
 
-    def _save_chat_to_file(self, filepath, title):
-        """将当前对话写入文件（底层）。"""
+    def _save_chat_to_dir(self, chat_dir: Path, title: str):
+        """将当前对话写入 chat_dir/chat.json。"""
+        chat_dir.mkdir(parents=True, exist_ok=True)
         data = {
             "title": title,
             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -143,10 +221,9 @@ class ChatManager:
             "turn_count": self.app.turn_count,
             "history": self.app.history_snapshot(),
         }
-        return save_json(filepath, data)
+        return save_json(chat_dir / "chat.json", data)
 
     def _fallback_chat_title(self) -> str:
-        """AI 不可用时的备选标题：剧本名 - 场景时间 - HH:MM"""
         ac = self.app._profile_config.get("app", {})
         profile_name = ac.get("title", self.app.title)
         scene_time = ""
@@ -162,22 +239,22 @@ class ChatManager:
         return " - ".join(parts)
 
     def save_current_chat(self, show_feedback=True):
-        """保存当前对话（含 AI 标题生成）。
-        通过 bus 发 "saving" 和 "saved" 事件。"""
         if not self.app.history:
             if show_feedback:
                 self.bus.emit("saved", {"title": "", "success": False,
-                                        "message": "没有对话内容可保存", "path": None})
+                                         "message": "没有对话内容可保存", "path": None})
             return
 
         self._ensure_chats_dir()
+
         if self._loaded_chat_path is not None:
-            filepath = self._loaded_chat_path
+            chat_dir = self._loaded_chat_path
         else:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filepath = self.chats_dir / f"chat_{ts}.json"
+            chat_dir = self.chats_dir / f"chat_{ts}"
 
-        # 快照（防竞态：保存→AI标题→回写 期间 history 可能被清空）
+        chat_dir.mkdir(parents=True, exist_ok=True)
+
         saved_data = {
             "title": self._fallback_chat_title(),
             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -189,7 +266,8 @@ class ChatManager:
             "turn_count": self.app.turn_count,
             "history": self.app.history_snapshot(),
         }
-        save_json(filepath, saved_data)
+        save_json(chat_dir / "chat.json", saved_data)
+        self._loaded_chat_path = chat_dir
 
         if show_feedback:
             self.bus.emit("saving", None)
@@ -197,27 +275,23 @@ class ChatManager:
         _caller_profile = config.app_config.get("active_profile", "")
 
         def _on_title_ready(title):
-            # 总是回写标题（filepath 在保存时已确定，指向正确的剧本目录）
             saved_data["title"] = title
             saved_data["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            save_json(filepath, saved_data)
+            save_json(chat_dir / "chat.json", saved_data)
             self._last_save_time = time.time()
             self._last_saved_count = len(saved_data.get("history", []))
             self._last_autosave_len = self._last_saved_count
-            # 仅当仍在同一剧本时清除该剧本的自动存档
             if config.app_config.get("active_profile", "") == _caller_profile:
                 self._clear_autosave()
             else:
-                # 已切换剧本：清除保存目标剧本（旧活跃剧本）的自动存档
-                self._clear_autosave(filepath.parent)
+                self._clear_autosave(chat_dir)
             if show_feedback:
                 self.bus.emit("saved", {"title": title, "success": True,
-                                        "message": "保存成功", "path": str(filepath)})
+                                         "message": "保存成功", "path": str(chat_dir)})
 
         self._generate_chat_title(_on_title_ready)
 
     def _generate_chat_title(self, callback):
-        """AI 生成对话标题（后台线程），完成后调用 callback(title)"""
         recent = self.app.history_snapshot()[-6:] if len(self.app.history) >= 4 else self.app.history_snapshot()
         if not recent or not config.API_KEY:
             callback(self._fallback_chat_title())
@@ -251,10 +325,19 @@ class ChatManager:
 
     # ── 读取 ──
 
-    def load_chat(self, filepath) -> bool:
-        """读取对话文件，恢复历史到 app 状态。
-        返回 True 成功 / False 失败。UI 重建由调用方负责（监听 stopped 事件后重建）"""
-        data = load_json(filepath)
+    def load_chat(self, chat_path) -> bool:
+        """读取对话存档，恢复历史到 app 状态。
+
+        chat_path 可以是：
+        - 目录（新格式）→ 读取 chat.json
+        - .json 文件（旧格式）→ 直接读取，但不设置 _loaded_chat_path
+          （下次保存时自动迁移到新格式）
+
+        返回 True 成功 / False 失败。
+        """
+        chat_path = Path(chat_path)
+        json_path = _resolve_chat_json(chat_path)
+        data = load_json(json_path)
         if not data or "history" not in data:
             return False
 
@@ -265,7 +348,6 @@ class ChatManager:
             app.turn_idx = data.get("turn_idx", 0)
             app.turn_count = data.get("turn_count", 0)
             app.message_count = data.get("message_count", len(app.history))
-        # 重建沉默追踪
         app._char_last_turn = {}
         for i, entry in enumerate(reversed(app.history)):
             name = entry.get("name", "")
@@ -275,21 +357,27 @@ class ChatManager:
         saved_scene = data.get("scene_idx", 0)
         if 0 <= saved_scene < len(app.scenes):
             app.scene_idx = saved_scene
-        # 恢复动态场景（若保存时存在）
         saved_current_scene = data.get("current_scene")
         if saved_current_scene:
             app.current_scene = saved_current_scene
 
-        self._loaded_chat_path = filepath
-        # 加载后视为已保存（消息数与存档一致）
+        # 新格式：目录路径；旧格式：不移入 loaded，下次保存自动迁移
+        if chat_path.is_dir():
+            self._loaded_chat_path = chat_path
+        else:
+            self._loaded_chat_path = None
+
         self._last_saved_count = len(app.history)
         self._last_autosave_len = len(app.history)
         return True
 
-    def delete_chat(self, filepath) -> bool:
-        """删除对话文件"""
+    def delete_chat(self, chat_path) -> bool:
         try:
-            filepath.unlink()
+            chat_path = Path(chat_path)
+            if chat_path.is_dir():
+                shutil.rmtree(chat_path)
+            else:
+                chat_path.unlink()
             return True
         except Exception as e:
             print(f"[chat] 删除失败: {e}")
@@ -298,82 +386,84 @@ class ChatManager:
     # ── 自动存档 ──
 
     def _auto_save(self):
-        """暂停 / app 切后台时静默自动存档（不调 AI 标题）。"""
         if not self.app.history:
             return
         if len(self.app.history) == self._last_autosave_len:
-            return  # 无变化，跳过
+            return
         self._ensure_chats_dir()
         if not self.chats_dir:
             return
-        filepath = self.chats_dir / "_autosave.json"
+        autosave_dir = self.chats_dir / "_autosave"
         title = self._fallback_chat_title()
-        self._save_chat_to_file(filepath, title)
+        self._save_chat_to_dir(autosave_dir, title)
         self._last_autosave_len = len(self.app.history)
         self._last_saved_count = len(self.app.history)
         self._last_save_time = time.time()
 
     def _clear_autosave(self, chats_dir=None):
-        """删除自动存档（用户已手动保存）。
-
-        Args:
-            chats_dir: 指定存档目录；默认用当前活跃剧本的 chats_dir。
-            保存回写标题时传入 filepath.parent 以清除保存目标剧本的自动存档。
-        """
-        target = chats_dir or self.chats_dir
+        target = Path(chats_dir) if chats_dir else self.chats_dir
         if not target:
             return
-        p = target / "_autosave.json"
-        if p.exists():
+        # 新格式目录
+        autosave_dir = target / "_autosave"
+        if autosave_dir.is_dir():
             try:
-                p.unlink()
+                shutil.rmtree(autosave_dir)
+            except Exception:
+                pass
+        # 旧格式文件
+        old = target / "_autosave.json"
+        if old.exists():
+            try:
+                old.unlink()
             except Exception:
                 pass
 
     def has_unsaved_messages(self) -> bool:
-        """是否有未保存消息。
-
-        判断依据：有对话历史 且 消息数与上次保存时不同。
-        """
         if not self.app.history:
             return False
         if self._last_saved_count < 0:
-            return True  # 从未保存过
+            return True
         return len(self.app.history) != self._last_saved_count
 
     def check_autosave_on_start(self):
-        """启动时检测自动存档，有则发 "autosave_prompt" 事件让 UI 询问。"""
         if not self.chats_dir:
             return
-        p = self.chats_dir / "_autosave.json"
-        if not p.exists():
-            return
-        data = load_json(p)
+        target = self.chats_dir / "_autosave"
+        json_path = target / "chat.json" if target.is_dir() else None
+        old_path = self.chats_dir / "_autosave.json"
+
+        data = None
+        path = None
+        if json_path and json_path.exists():
+            data = load_json(json_path)
+            path = str(target)
+        elif old_path.exists():
+            data = load_json(old_path)
+            path = str(old_path)
+
         if not data or not data.get("history"):
-            try:
-                p.unlink()
-            except Exception:
-                pass
+            self._clear_autosave()
             return
         self.bus.emit("autosave_prompt", {
             "title": data.get("title", "自动存档"),
             "message_count": data.get("message_count", 0),
-            "path": str(p),
+            "path": path,
         })
 
     def restore_autosave(self, path: str) -> bool:
-        """用户选择恢复自动存档"""
         ok = self.load_chat(Path(path))
         if ok:
             self._clear_autosave()
-            # 清除 _loaded_chat_path：自动存档文件已被删除，
-            # 后续保存应创建新的时间戳文件而非写入已删除的 _autosave.json
             self._loaded_chat_path = None
         return ok
 
     def discard_autosave(self, path: str):
-        """用户选择放弃自动存档"""
         try:
-            Path(path).unlink()
+            p = Path(path)
+            if p.is_dir():
+                shutil.rmtree(p)
+            else:
+                p.unlink()
         except Exception:
             pass

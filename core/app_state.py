@@ -22,6 +22,7 @@ from core.ai_engine import AIEngine
 from core.chat_manager import ChatManager
 from core.data_manager import DataManager
 from core.dialogue_loop import DialogueLoop
+from core.image_generator import ImageGenerator
 
 import config
 
@@ -38,6 +39,7 @@ class AppState:
         self.chat = ChatManager(self)
         self.data = DataManager(self)
         self.loop = DialogueLoop(self)
+        self.image_gen = ImageGenerator(self)
 
         # ── 当前剧本数据 ──
         self.profile_dir = None
@@ -89,6 +91,13 @@ class AppState:
         self._active_npc: Optional[dict] = None
         self._npc_silent_turns: int = 0
         self._npc_rounds_left: int = 0
+
+        # ── 图像生成状态 ──
+        self.image_gen_enabled: bool = False
+        self.image_gen_auto_interval: int = config.IMAGE_GEN_AUTO_INTERVAL
+        self.image_gen_char_cooldown: int = config.IMAGE_GEN_CHAR_COOLDOWN
+        self._last_image_turn: int = -1
+        self._auto_image_counter: int = 0
 
     # ═══ 便捷方法 ═══
 

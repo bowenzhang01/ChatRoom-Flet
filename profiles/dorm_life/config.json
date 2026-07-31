@@ -7,7 +7,8 @@
     "user_mode": false,
     "display_name": "女生寝室·日常",
     "random_event": false,
-    "dynamic_scene": false
+    "dynamic_scene": false,
+    "image_gen": true
   },
   "turn": {
     "order": [

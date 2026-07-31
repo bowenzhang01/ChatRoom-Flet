@@ -7,12 +7,16 @@
   关于：版本 / GitHub / 反馈 / 许可证
 """
 
+import json
+from pathlib import Path
+
 import flet as ft
 
 import config
 from app.views import ViewBase
 from app.theme import THEME_MODES, COLORS, COLOR_THEMES, rebuild_themes, get_color_theme_key, TEXT_XL, TEXT_ML, TEXT_SM, TEXT_XS, FONT_SCALE_LABELS, get_font_scale_key
 from services.api_service import test_connection_async, fetch_models_async
+from app.components.progress_dialog import ProgressDialog
 
 __all__ = ["SettingsView"]
 
@@ -46,24 +50,85 @@ class SettingsView(ViewBase):
         self._ssl_sw: ft.Switch = None
         self._proxy_sw: ft.Switch = None
 
+        # ComfyUI 图像生成卡片 ── 路径
+        self._python_path_field: ft.TextField = None
+        self._comfyui_path_field: ft.TextField = None
+        self._data_path_field: ft.TextField = None
+        # ComfyUI ── 模型
+        self._diffusion_field: ft.TextField = None
+        self._clip_field: ft.TextField = None
+        self._vae_field: ft.TextField = None
+        self._scan_models_btn: ft.TextButton = None
+        self._model_scan_result: ft.Text = None
+        # ComfyUI ── 生成参数
+        self._width_dd: ft.Dropdown = None
+        self._height_dd: ft.Dropdown = None
+        self._steps_slider: ft.Slider = None
+        self._steps_text: ft.Text = None
+        self._cfg_slider: ft.Slider = None
+        self._cfg_text: ft.Text = None
+        # ComfyUI ── 工作流 & 节点覆盖
+        self._workflow_path_field: ft.TextField = None
+        self._wf_detect_btn: ft.TextButton = None
+        self._wf_detect_result: ft.Column = None
+        self._node_override_fields: dict = {}
+
     def build(self) -> ft.Control:
+        gen_tab_content = ft.Container(
+            content=ft.Column(
+                controls=[self._build_api_card(), self._build_appearance_card(),
+                          self._build_behavior_card(), self._build_about_card()],
+                spacing=12,
+                scroll=ft.ScrollMode.AUTO,
+                expand=True,
+            ),
+            padding=ft.Padding.all(16),
+            expand=True,
+        )
+
+        img_tab_content = ft.Container(
+            content=ft.Column(
+                controls=[
+                    self._build_image_gen_control_card(),
+                    self._build_comfyui_path_card(),
+                    self._build_comfyui_model_card(),
+                    self._build_comfyui_param_card(),
+                    self._build_comfyui_advanced_card(),
+                ],
+                spacing=12,
+                scroll=ft.ScrollMode.AUTO,
+                expand=True,
+            ),
+            padding=ft.Padding.all(16),
+            expand=True,
+        )
+
         self._root = ft.Column(
             controls=[
                 self._build_title(),
-                ft.Container(
-                    content=ft.Column(
-                        controls=[
-                            self._build_api_card(),
-                            self._build_appearance_card(),
-                            self._build_behavior_card(),
-                            self._build_about_card(),
-                        ],
-                        spacing=12,
-                        scroll=ft.ScrollMode.AUTO,
-                        expand=True,
-                    ),
-                    padding=ft.Padding.all(16),
+                ft.Tabs(
+                    length=2,
                     expand=True,
+                    content=ft.Column(
+                        expand=True,
+                        controls=[
+                            ft.TabBar(
+                                tabs=[
+                                    ft.Tab(label="通用设置"),
+                                    ft.Tab(label="图像生成"),
+                                ],
+                            ),
+                            ft.TabBarView(
+                                expand=True,
+                                controls=[
+                                    gen_tab_content,
+                                    img_tab_content,
+                                ],
+                            ),
+                        ],
+                    ),
+                    selected_index=0,
+                    on_change=self._on_tab_change,
                 ),
             ],
             spacing=0,
@@ -71,6 +136,9 @@ class SettingsView(ViewBase):
         )
         self._built = True
         return self._root
+
+    def _on_tab_change(self, e):
+        pass  # TabBarView handles content switching automatically
 
     def _build_title(self) -> ft.Control:
         return ft.Container(
@@ -380,18 +448,15 @@ class SettingsView(ViewBase):
         self._user_sw = ft.Switch(label="用户模式", value=self.state.user_mode)
         self._dynamic_sw = ft.Switch(label="动态场景", value=self.state.dynamic_scene_enabled)
         self._random_sw = ft.Switch(label="随机事件", value=self.state.random_event_enabled)
-
         def _persist(e=None):
             pc = self.state._profile_config.setdefault("app", {})
             pc["director_mode"] = self._director_sw.value
             pc["user_mode"] = self._user_sw.value
             pc["dynamic_scene"] = self._dynamic_sw.value
             pc["random_event"] = self._random_sw.value
-            # 立即更新运行时状态
             self.state.director_mode = self._director_sw.value
             self.state.dynamic_scene_enabled = self._dynamic_sw.value
             self.state.random_event_enabled = self._random_sw.value
-            # 用户模式：同步 turn_order 中的 You
             if self._user_sw.value != self.state.user_mode:
                 self.state.user_mode = self._user_sw.value
                 if self._user_sw.value:
@@ -425,6 +490,7 @@ class SettingsView(ViewBase):
         )
         self._streaming_sw = ft.Switch(label="流式输出", value=config.STREAMING_ENABLED)
         self._streaming_sw.on_change = self._on_streaming_change
+
         return self._card("对话行为（当前剧本，立即生效）", [
             self._director_sw, self._user_sw, self._dynamic_sw, self._random_sw,
             ft.Container(height=4),
@@ -460,6 +526,465 @@ class SettingsView(ViewBase):
         except Exception:
             pass
 
+    def _show_comfyui_startup_progress(self):
+        import threading
+        dlg = ProgressDialog(self.page, title="启动 ComfyUI")
+
+        def _on_status(data):
+            stage = data.get("stage", "")
+            detail = data.get("detail", "")
+            if stage == "ready":
+                dlg.complete(detail, auto_close_ms=2000)
+                self.state.bus.off("comfyui_status", _on_status)
+            elif stage == "failed":
+                dlg.fail(detail)
+                self.state.bus.off("comfyui_status", _on_status)
+                self._image_gen_sw.value = False
+                self.state.image_gen_enabled = False
+                try:
+                    self._image_gen_sw.update()
+                except Exception:
+                    pass
+            else:
+                dlg.set_status(detail)
+
+        self.state.bus.on("comfyui_status", _on_status)
+        dlg.show(status="正在启动 ComfyUI 后端...", indeterminate=True)
+
+        def _run_start():
+            try:
+                self.state.image_gen.start()
+            except Exception as ex:
+                print(f"[settings] start() 异常: {ex}")
+
+        threading.Thread(target=_run_start, daemon=True).start()
+
+    def _on_image_gen_toggle(self, e=None):
+        enabled = self._image_gen_sw.value
+        print(f"[settings] 图像生成开关: {enabled}")
+        self.state.image_gen_enabled = enabled
+        pc = self.state._profile_config.setdefault("app", {})
+        pc["image_gen"] = enabled
+        try:
+            self.state.data._save_profile_config()
+        except Exception as ex:
+            print(f"[settings] 保存 image_gen 配置失败: {ex}")
+        if enabled:
+            if self.state.image_gen.ready:
+                return
+            self._show_comfyui_startup_progress()
+        else:
+            self.state.image_gen.stop()
+
+    def _on_image_gen_param_change(self, key: str, value: int):
+        """更新图像生成的间隔/冷却参数。"""
+        setattr(self.state, f"image_gen_{key}", value)
+        config.app_config.setdefault("image_gen", {})[key] = value
+        setattr(config, f"IMAGE_GEN_{key.upper()}", value)
+        try:
+            self.state.data._save_config()
+        except Exception:
+            pass
+
+    # ═══ 图像生成控制卡片 ═══
+
+    def _build_image_gen_control_card(self) -> ft.Control:
+        self._image_gen_sw = ft.Switch(label="图像生成 (ComfyUI)", value=self.state.image_gen_enabled)
+        self._image_gen_sw.on_change = self._on_image_gen_toggle
+
+        self._auto_interval_dd = ft.Dropdown(
+            value=str(self.state.image_gen_auto_interval),
+            options=[ft.dropdown.Option("0", text="从不")] + [ft.dropdown.Option(str(i), text=f"每 {i} 轮") for i in range(3, 15)],
+            dense=True, width=140,
+            on_select=lambda e: self._on_image_gen_param_change("auto_interval", int(e.control.value)),
+        )
+        self._char_cooldown_dd = ft.Dropdown(
+            value=str(self.state.image_gen_char_cooldown),
+            options=[ft.dropdown.Option("0", text="从不")] + [ft.dropdown.Option(str(i), text=f"{i} 轮") for i in range(4, 15)],
+            dense=True, width=140,
+            on_select=lambda e: self._on_image_gen_param_change("char_cooldown", int(e.control.value)),
+        )
+
+        return self._card("图像生成控制", [
+            self._image_gen_sw,
+            ft.Text("自动插图间隔", size=TEXT_SM, color=ft.Colors.ON_SURFACE_VARIANT),
+            self._auto_interval_dd,
+            ft.Text("角色请求冷却", size=TEXT_SM, color=ft.Colors.ON_SURFACE_VARIANT),
+            self._char_cooldown_dd,
+        ])
+
+    # ═══ ComfyUI 图像生成卡片 ═══
+
+    # ═══ ComfyUI 路径持久化 ═══
+
+    def _persist_comfyui_paths(self, e=None):
+        config.app_config.setdefault("comfyui", {})
+        cfg = config.app_config["comfyui"]
+        if self._python_path_field:
+            cfg["python_path"] = self._python_path_field.value or ""
+            config.COMFYUI_PYTHON_PATH = cfg["python_path"]
+        if self._comfyui_path_field:
+            cfg["comfyui_path"] = self._comfyui_path_field.value or ""
+            config.COMFYUI_MAIN_PATH = cfg["comfyui_path"]
+        if self._data_path_field:
+            cfg["data_path"] = self._data_path_field.value or ""
+            config.COMFYUI_DATA_PATH = cfg["data_path"]
+        try:
+            self.state.data._save_config()
+        except Exception:
+            pass
+
+    def _persist_comfyui_models(self, e=None):
+        config.app_config.setdefault("models", {})
+        cfg = config.app_config["models"]
+        if self._diffusion_field:
+            cfg["diffusion"] = self._diffusion_field.value or ""
+            config.COMFY_MODEL_DIFFUSION = cfg["diffusion"]
+        if self._clip_field:
+            cfg["clip"] = self._clip_field.value or ""
+            config.COMFY_MODEL_CLIP = cfg["clip"]
+        if self._vae_field:
+            cfg["vae"] = self._vae_field.value or ""
+            config.COMFY_MODEL_VAE = cfg["vae"]
+        try:
+            self.state.data._save_config()
+        except Exception:
+            pass
+
+    def _persist_comfyui_params(self, e=None):
+        config.app_config.setdefault("image_gen", {})
+        cfg = config.app_config["image_gen"]
+        if self._width_dd:
+            cfg["width"] = int(self._width_dd.value)
+            config.IMAGE_GEN_WIDTH = cfg["width"]
+        if self._height_dd:
+            cfg["height"] = int(self._height_dd.value)
+            config.IMAGE_GEN_HEIGHT = cfg["height"]
+        if self._steps_slider:
+            cfg["steps"] = int(self._steps_slider.value)
+            config.IMAGE_GEN_STEPS = cfg["steps"]
+        if self._cfg_slider:
+            cfg["cfg"] = float(self._cfg_slider.value)
+            config.IMAGE_GEN_CFG = cfg["cfg"]
+        try:
+            self.state.data._save_config()
+        except Exception:
+            pass
+
+    def _persist_workflow_settings(self, e=None):
+        config.app_config.setdefault("workflow", {})
+        cfg = config.app_config["workflow"]
+        if self._workflow_path_field:
+            cfg["path"] = self._workflow_path_field.value or ""
+            config.WORKFLOW_PATH = cfg["path"]
+        try:
+            self.state.data._save_config()
+        except Exception:
+            pass
+
+    def _persist_node_overrides(self, e=None):
+        overrides = {}
+        for key, field in self._node_override_fields.items():
+            if field.value:
+                overrides[key] = field.value.strip()
+        config.app_config.setdefault("workflow", {})["node_overrides"] = overrides
+        config.WORKFLOW_NODE_OVERRIDES = overrides
+        try:
+            self.state.data._save_config()
+        except Exception:
+            pass
+
+    def _on_test_comfyui_click(self, e=None):
+        self._persist_comfyui_paths()
+        ok = False
+        try:
+            ok = self.state.image_gen._check_api()
+        except Exception:
+            pass
+        msg = "ComfyUI API 可达" if ok else "无法连接 ComfyUI API（请检查路径、端口和 ComfyUI 是否启动）"
+        self._snack(msg)
+
+    def _on_scan_models_click(self, e=None):
+        self._persist_comfyui_paths()
+
+        found = {"unet": [], "clip": [], "vae": []}
+        categories = {"unet": "扩散模型", "clip": "CLIP", "vae": "VAE"}
+
+        comfyui_root = None
+        if config.COMFYUI_MAIN_PATH:
+            p = Path(config.COMFYUI_MAIN_PATH).parent
+            if (p / "models").is_dir():
+                comfyui_root = p
+        if comfyui_root is None and config.COMFYUI_DATA_PATH:
+            p = Path(config.COMFYUI_DATA_PATH)
+            if (p / "models").is_dir():
+                comfyui_root = p
+
+        if comfyui_root is None:
+            self._model_scan_result.value = "未找到 models/ 目录，请确认 ComfyUI 路径正确"
+        else:
+            _model_exts = ("*.safetensors", "*.ckpt", "*.pt", "*.pth")
+            _dir_map = {
+                "unet": ("unet", "checkpoints", "diffusion_models"),
+                "clip": ("clip", "text_encoders"),
+                "vae": ("vae",),
+            }
+            for cat in ("unet", "clip", "vae"):
+                for dir_name in _dir_map.get(cat, (cat,)):
+                    cat_dir = comfyui_root / "models" / dir_name
+                    if cat_dir.is_dir():
+                        for ext in _model_exts:
+                            for f in cat_dir.glob(ext):
+                                if f.name not in found[cat]:
+                                    found[cat].append(f.name)
+
+            lines = []
+            for cat, label in categories.items():
+                if found[cat]:
+                    lines.append(f"{label}: {', '.join(found[cat][:6])}"
+                                 + (f" 等{len(found[cat])}个" if len(found[cat]) > 6 else ""))
+                else:
+                    lines.append(f"{label}: 未找到")
+            self._model_scan_result.value = "\n".join(lines)
+
+        try:
+            self._model_scan_result.update()
+        except Exception:
+            pass
+
+        # 自动填充第一个找到的模型
+        for cat, field in [("unet", self._diffusion_field),
+                            ("clip", self._clip_field),
+                            ("vae", self._vae_field)]:
+            if found[cat] and (not field.value or field.value not in found[cat]):
+                field.value = found[cat][0]
+        self._persist_comfyui_models()
+
+    def _on_detect_nodes_click(self, e=None):
+        self._persist_workflow_settings()
+        custom_path = config.WORKFLOW_PATH
+        wf_path = config.get_workflow_path()
+        using_fallback = bool(custom_path) and str(wf_path) != str(Path(custom_path))
+
+        try:
+            with open(wf_path, encoding="utf-8") as f:
+                wf = json.load(f)
+        except Exception as ex:
+            self._wf_detect_result.controls = [
+                ft.Text(f"加载工作流失败: {ex}", color=ft.Colors.ERROR, size=TEXT_SM)
+            ]
+            try:
+                self._wf_detect_result.update()
+            except Exception:
+                pass
+            return
+
+        node_map = self.state.image_gen._scan_workflow_nodes(wf)
+        errors = self.state.image_gen._scan_errors
+        roles = [
+            ("positive_prompt", "Positive Prompt"),
+            ("negative_prompt", "Negative Prompt"),
+            ("sampler", "采样器 (KSampler)"),
+            ("latent", "潜空间 (Latent)"),
+            ("save", "保存图片 (SaveImage)"),
+            ("unet", "扩散模型 (UNET)"),
+            ("clip", "CLIP 模型"),
+            ("vae", "VAE 模型"),
+        ]
+
+        result_controls = []
+        result_controls.append(
+            ft.Text(f"检测文件: {wf_path.name}", size=TEXT_XS,
+                    color=ft.Colors.ON_SURFACE_VARIANT))
+        if using_fallback:
+            result_controls.append(
+                ft.Text(f"自定义路径不存在，已回退到内置工作流", size=TEXT_XS,
+                        color=ft.Colors.ORANGE))
+
+        for key, label in roles:
+            nid = node_map.get(key, "")
+            if nid:
+                result_controls.append(
+                    ft.Text(f"  ✅ {label} → 节点 #{nid}", size=TEXT_SM,
+                            color=ft.Colors.GREEN))
+            else:
+                result_controls.append(
+                    ft.Text(f"  ⚠️ {label} → 未检测到", size=TEXT_SM,
+                            color=ft.Colors.ORANGE))
+
+        if errors:
+            result_controls.append(ft.Container(height=4))
+            result_controls.append(ft.Text("检测问题:", size=TEXT_SM, weight=ft.FontWeight.W_600))
+            for err in errors:
+                result_controls.append(
+                    ft.Text(f"  ⚠ {err}", size=TEXT_XS, color=ft.Colors.ORANGE))
+
+        self._wf_detect_result.controls = result_controls
+        try:
+            self._wf_detect_result.update()
+        except Exception:
+            pass
+
+        # 同步到手动覆盖字段（只填空着的）
+        for key, _label in roles:
+            nid = node_map.get(key, "")
+            if nid and key in self._node_override_fields:
+                field = self._node_override_fields[key]
+                if not field.value:
+                    field.value = nid
+
+    def _build_comfyui_path_card(self) -> ft.Control:
+        self._python_path_field = ft.TextField(
+            value=config.COMFYUI_PYTHON_PATH, label="Python 路径",
+            hint_text="ComfyUI 虚拟环境的 python.exe", dense=True,
+            on_blur=self._persist_comfyui_paths,
+            on_submit=self._persist_comfyui_paths,
+        )
+        self._comfyui_path_field = ft.TextField(
+            value=config.COMFYUI_MAIN_PATH, label="main.py 路径",
+            hint_text="ComfyUI 的 main.py 入口", dense=True,
+            on_blur=self._persist_comfyui_paths,
+            on_submit=self._persist_comfyui_paths,
+        )
+        self._data_path_field = ft.TextField(
+            value=config.COMFYUI_DATA_PATH, label="数据目录",
+            hint_text="ComfyUI 数据目录（output/input/user）", dense=True,
+            on_blur=self._persist_comfyui_paths,
+            on_submit=self._persist_comfyui_paths,
+        )
+
+        return self._card("ComfyUI 路径", [
+            self._python_path_field,
+            self._comfyui_path_field,
+            self._data_path_field,
+            ft.Container(height=4),
+            ft.OutlinedButton("测试 ComfyUI 连接", icon=ft.Icons.NETWORK_CHECK,
+                              on_click=self._on_test_comfyui_click),
+        ])
+
+    def _build_comfyui_model_card(self) -> ft.Control:
+        self._diffusion_field = ft.TextField(
+            value=config.COMFY_MODEL_DIFFUSION, label="扩散模型 (UNET)",
+            hint_text="文件名.safetensors", dense=True,
+            on_blur=self._persist_comfyui_models,
+            on_submit=self._persist_comfyui_models,
+        )
+        self._clip_field = ft.TextField(
+            value=config.COMFY_MODEL_CLIP, label="CLIP 模型",
+            hint_text="文件名.safetensors", dense=True,
+            on_blur=self._persist_comfyui_models,
+            on_submit=self._persist_comfyui_models,
+        )
+        self._vae_field = ft.TextField(
+            value=config.COMFY_MODEL_VAE, label="VAE 模型",
+            hint_text="文件名.safetensors", dense=True,
+            on_blur=self._persist_comfyui_models,
+            on_submit=self._persist_comfyui_models,
+        )
+        self._model_scan_result = ft.Text("", size=TEXT_XS,
+                                           color=ft.Colors.ON_SURFACE_VARIANT)
+
+        return self._card("模型文件", [
+            self._diffusion_field,
+            self._clip_field,
+            self._vae_field,
+            ft.Container(height=4),
+            ft.Row([
+                ft.OutlinedButton("扫描模型目录", icon=ft.Icons.SEARCH,
+                                  on_click=self._on_scan_models_click),
+            ]),
+            self._model_scan_result,
+        ])
+
+    def _build_comfyui_param_card(self) -> ft.Control:
+        sizes = [512, 768, 1024, 1280, 1536]
+        self._width_dd = ft.Dropdown(
+            value=str(config.IMAGE_GEN_WIDTH),
+            options=[ft.dropdown.Option(str(s), text=str(s)) for s in sizes],
+            dense=True, width=100,
+            on_select=lambda e: self._persist_comfyui_params(),
+        )
+        self._height_dd = ft.Dropdown(
+            value=str(config.IMAGE_GEN_HEIGHT),
+            options=[ft.dropdown.Option(str(s), text=str(s)) for s in sizes],
+            dense=True, width=100,
+            on_select=lambda e: self._persist_comfyui_params(),
+        )
+        self._steps_text = ft.Text(str(config.IMAGE_GEN_STEPS), size=TEXT_SM, width=30)
+        self._steps_slider = ft.Slider(
+            value=float(config.IMAGE_GEN_STEPS), min=1, max=30, divisions=29,
+            label="{value:.0f} 步",
+            on_change=lambda e: [setattr(self._steps_text, 'value', str(int(e.control.value))),
+                                 self._steps_text.update(), self._persist_comfyui_params()],
+        )
+        self._cfg_text = ft.Text(f"{config.IMAGE_GEN_CFG:.1f}", size=TEXT_SM, width=30)
+        self._cfg_slider = ft.Slider(
+            value=float(config.IMAGE_GEN_CFG), min=1.0, max=15.0, divisions=28,
+            label="{value:.1f}",
+            on_change=lambda e: [setattr(self._cfg_text, 'value', f"{e.control.value:.1f}"),
+                                 self._cfg_text.update(), self._persist_comfyui_params()],
+        )
+
+        return self._card("生成参数", [
+            ft.Text("尺寸", size=TEXT_SM, color=ft.Colors.ON_SURFACE_VARIANT),
+            ft.Row([self._width_dd, ft.Text("×", size=TEXT_SM), self._height_dd], spacing=8),
+            ft.Text("采样步数", size=TEXT_SM, color=ft.Colors.ON_SURFACE_VARIANT),
+            ft.Row([self._steps_slider, self._steps_text], spacing=8),
+            ft.Text("CFG Scale", size=TEXT_SM, color=ft.Colors.ON_SURFACE_VARIANT),
+            ft.Row([self._cfg_slider, self._cfg_text], spacing=8),
+        ])
+
+    def _build_comfyui_advanced_card(self) -> ft.Control:
+        self._workflow_path_field = ft.TextField(
+            value=config.WORKFLOW_PATH, label="工作流 JSON 文件",
+            hint_text="留空则使用内置工作流", dense=True,
+            on_blur=self._persist_workflow_settings,
+            on_submit=self._persist_workflow_settings,
+        )
+
+        self._wf_detect_btn = ft.OutlinedButton(
+            "检测节点", icon=ft.Icons.SEARCH,
+            on_click=self._on_detect_nodes_click,
+        )
+
+        self._wf_detect_result = ft.Column(controls=[], spacing=2)
+
+        # 手动覆盖字段
+        override_labels = [
+            ("positive_prompt", "Positive Prompt"),
+            ("negative_prompt", "Negative Prompt"),
+            ("sampler", "采样器"),
+            ("latent", "潜空间"),
+            ("save", "保存图片"),
+            ("unet", "扩散模型 (UNET)"),
+            ("clip", "CLIP"),
+            ("vae", "VAE"),
+        ]
+        existing = config.WORKFLOW_NODE_OVERRIDES or {}
+        override_fields = []
+        for key, label in override_labels:
+            tf = ft.TextField(
+                value=existing.get(key, ""), label=label,
+                hint_text="节点ID（自动检测失败时填写）",
+                dense=True, width=120,
+                on_blur=self._persist_node_overrides,
+            )
+            self._node_override_fields[key] = tf
+            override_fields.append(tf)
+
+        return self._card("", [
+            ft.Text("工作流", size=TEXT_ML, weight=ft.FontWeight.W_600),
+            self._workflow_path_field,
+            ft.Row([self._wf_detect_btn]),
+            ft.Container(content=self._wf_detect_result),
+            ft.Container(height=8),
+            ft.Text("手动节点覆盖（高级）", size=TEXT_SM, color=ft.Colors.ON_SURFACE_VARIANT),
+            ft.Text("自动检测失败时可在此手动填写节点 ID", size=TEXT_XS,
+                    color=ft.Colors.ON_SURFACE_VARIANT),
+            ft.Row(override_fields[:4], spacing=8, wrap=True),
+            ft.Row(override_fields[4:], spacing=8, wrap=True),
+        ])
+
     # ═══ 关于 ═══
     def _build_about_card(self) -> ft.Control:
         theme_name = COLOR_THEMES.get(get_color_theme_key(), {}).get("name", "极光")
@@ -486,9 +1011,6 @@ class SettingsView(ViewBase):
     def on_enter(self):
         if not self._built:
             return
-        # 用 load_profile_for_edit 而非 load_profile：后者会无条件重置 current_scene/scene_idx 等
-        # 对话运行时状态，导致用户从剧本页回到设置页再回聊天页时场景上下文丢失。
-        # load_profile_for_edit 保存并恢复这些运行时状态。
         active = config.app_config.get("active_profile", "")
         if active and self.state.profile_dir:
             current_folder = self.state.profile_dir.name
@@ -499,12 +1021,44 @@ class SettingsView(ViewBase):
                     print(f"[settings] on_enter load_profile_for_edit 失败: {ex}")
         self._sync_api_fields()
         self._render_behavior()
+        self._sync_comfyui_fields()
+        # 若模型列表为空且有 API Key，自动尝试获取模型
+        if not config.MODELS_LIST and config.API_KEY:
+            self._fetch_models(config.API_BASE, config.API_KEY)
         if self._color_theme_dd:
             self._color_theme_dd.value = self.ui.color_theme_key
             try:
                 self._color_theme_dd.update()
             except Exception:
                 pass
+
+    def _sync_comfyui_fields(self):
+        if self._python_path_field:
+            self._python_path_field.value = config.COMFYUI_PYTHON_PATH
+        if self._comfyui_path_field:
+            self._comfyui_path_field.value = config.COMFYUI_MAIN_PATH
+        if self._data_path_field:
+            self._data_path_field.value = config.COMFYUI_DATA_PATH
+        if self._diffusion_field:
+            self._diffusion_field.value = config.COMFY_MODEL_DIFFUSION
+        if self._clip_field:
+            self._clip_field.value = config.COMFY_MODEL_CLIP
+        if self._vae_field:
+            self._vae_field.value = config.COMFY_MODEL_VAE
+        if self._width_dd:
+            self._width_dd.value = str(config.IMAGE_GEN_WIDTH)
+        if self._height_dd:
+            self._height_dd.value = str(config.IMAGE_GEN_HEIGHT)
+        if self._steps_slider:
+            self._steps_slider.value = float(config.IMAGE_GEN_STEPS)
+        if self._steps_text:
+            self._steps_text.value = str(config.IMAGE_GEN_STEPS)
+        if self._cfg_slider:
+            self._cfg_slider.value = float(config.IMAGE_GEN_CFG)
+        if self._cfg_text:
+            self._cfg_text.value = f"{config.IMAGE_GEN_CFG:.1f}"
+        if self._workflow_path_field:
+            self._workflow_path_field.value = config.WORKFLOW_PATH
 
     def on_leave(self):
         if not self._built:
@@ -578,6 +1132,12 @@ class SettingsView(ViewBase):
             self._dynamic_sw.value = self.state.dynamic_scene_enabled
         if self._random_sw:
             self._random_sw.value = self.state.random_event_enabled
+        if self._image_gen_sw:
+            self._image_gen_sw.value = self.state.image_gen_enabled
+        if self._auto_interval_dd:
+            self._auto_interval_dd.value = str(self.state.image_gen_auto_interval)
+        if self._char_cooldown_dd:
+            self._char_cooldown_dd.value = str(self.state.image_gen_char_cooldown)
         if self._mode_dd:
             self._mode_dd.value = self.state.mode if self.state.mode in ("round", "random", "dynamic") else "round"
         if self._speed_dd:

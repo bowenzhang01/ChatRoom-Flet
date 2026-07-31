@@ -22,5 +22,30 @@
   },
   "behavior": {
     "streaming": true
+  },
+  "comfyui": {
+    "host": "127.0.0.1",
+    "port": 8188,
+    "python_path": "D:\\Bowen\\ComfyUI_Data\\.venv\\Scripts\\python.exe",
+    "comfyui_path": "C:\\Users\\bowen\\ComfyUI-Installs\\ComfyUI\\ComfyUI\\main.py",
+    "data_path": "D:\\Bowen\\ComfyUI_Data",
+    "auto_start": true,
+    "auto_close": true,
+    "startup_timeout": 300,
+    "gen_timeout": 600
+  },
+  "image_gen": {
+    "enabled": false,
+    "auto_interval": 6,
+    "char_cooldown": 6,
+    "width": 1024,
+    "height": 1024,
+    "steps": 8,
+    "cfg": 5.0
+  },
+  "models": {
+    "diffusion": "flux-2-klein-9b-fp8.safetensors",
+    "clip": "qwen_3_8b_fp8mixed.safetensors",
+    "vae": "flux2-vae.safetensors"
   }
 }

@@ -732,6 +732,8 @@ class ChatView(ViewBase):
             "msg_end": self._on_msg_end,
             "random_event_msg": self._on_random_event,
             "random_npc_msg": self._on_npc,
+            "image_done": self._on_image_done,
+            "image_error": self._on_image_error,
             "set_status": self._on_set_status,
             "scene_changed": self._on_scene_changed,
             "user_turn": self._on_user_turn,
@@ -862,6 +864,12 @@ class ChatView(ViewBase):
         if entry.get("streaming"):
             return self._on_streaming_start(entry)
         self._add_entry(entry)
+
+    def _on_image_done(self, entry):
+        self._add_entry(entry)
+
+    def _on_image_error(self, msg):
+        print(f"[chat_view] 图像生成失败: {msg}")
 
     def _add_entry(self, entry):
         row = make_bubble_row(entry, self.state, self._bubble_max_width())

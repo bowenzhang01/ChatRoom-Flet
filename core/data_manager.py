@@ -104,6 +104,8 @@ class DataManager:
 
         # 随机事件状态（参数用 config 默认值，不从 profile 读取）
         app.random_event_enabled = ac.get("random_event", False)
+        # 图像生成状态
+        app.image_gen_enabled = False
         # 向后兼容：旧配置将 random_event 放在顶层（dict 带 enabled 字段），迁移到 app 下
         top_random = app._profile_config.get("random_event")
         if isinstance(top_random, dict):

@@ -98,7 +98,7 @@ class AIEngine:
         )
 
     def _build_output_hints(self, current_speaker: str) -> str:
-        """动态模式追加 [NEXT] 提示；动态场景追加 [SCENE] 提示。"""
+        """动态模式追加 [NEXT] 提示；动态场景追加 [SCENE] 提示；图像模式追加 [IMAGE] 提示。"""
         parts = []
 
         if self.app.mode == "dynamic":
@@ -118,6 +118,19 @@ class AIEngine:
                 f"[SCENE]time。地点：location。description[/SCENE]\n"
                 f"Use the same format as the scene description above. "
                 f"Only include this if the scene actually changed."
+            )
+
+        if self.app.image_gen_enabled:
+            parts.append(
+                f"\n\nIf the current moment is visually striking and worth illustrating, "
+                f"you may request an illustration on your very last line:\n"
+                f"[IMAGE:a detailed English description for image generation]\n"
+                f"Style: Japanese anime (Studio Ghibli / Makoto Shinkai aesthetic). "
+                f"Include: composition/camera angle, character positions/poses/appearances/clothing, "
+                f"facial expressions, lighting/color palette, environment.\n"
+                f"Write in English, 60-120 words, as a natural descriptive paragraph. "
+                f"Focus on 1-3 characters who are in the scene, keep composition clean with a clear focal point. "
+                f"Use sparingly. Do NOT include [IMAGE] inside your dialogue."
             )
 
         return "".join(parts)
@@ -267,7 +280,7 @@ class AIEngine:
         print(f"[director] picked: {picked}")
         return picked
 
-    # ═══ 标签解析（[SCENE] / [NEXT]）═══
+    # ═══ 标签解析（[SCENE] / [NEXT] / [IMAGE]）═══
 
     def _parse_and_strip_scene_tag(self, text: str):
         """解析并剥离所有 [SCENE]...[/SCENE] 标签。
@@ -314,6 +327,18 @@ class AIEngine:
         next_name = matches[-1].strip()
         clean = re.sub(r'\s*\[NEXT:[^\]]+\]', '', text).strip()
         return (clean, next_name)
+
+    def _parse_and_strip_image_tag(self, text: str):
+        """解析并剥离 [IMAGE:...] 标签。
+        取最后一个 [IMAGE] 的 prompt，剥离所有出现的标签。
+        返回 (clean_text, image_prompt_or_None)。"""
+        matches = re.findall(r'\[IMAGE:([^\]]+)\]', text)
+        if not matches:
+            return (text, None)
+        image_prompt = matches[-1].strip()
+        clean = re.sub(r'\s*\[IMAGE:[^\]]+\]', '', text).strip()
+        print(f"[image] tag detected from char: {image_prompt[:80]}...")
+        return (clean, image_prompt)
 
     # ═══ 随机事件 / NPC 引擎 ═══
 

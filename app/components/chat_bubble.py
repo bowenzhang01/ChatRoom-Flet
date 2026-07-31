@@ -9,9 +9,11 @@
   气泡 border_radius=16 四角统一，无尾巴。
 """
 
+import os
 import re
 
 import flet as ft
+from flet.controls.box import BoxFit
 
 from app.theme import RADIUS_BUBBLE, RADIUS_PILL, TEXT_SM, TEXT_XS
 
@@ -86,24 +88,26 @@ def _render_bubble_text(text: str, max_width: float) -> ft.Column:
 
 
 def strip_streaming_tags(text: str) -> str:
-    """流式中剥离末尾不完整的 [SCENE] 和 [NEXT] 标签。
-    角色对话不使用 [] 方括号，遇到 [SCENE 或 [NEXT: 即判定为标签。
-    同时隐藏末尾不完整的标签前缀（如 [SCE、[NEX），避免 token 边界闪烁。"""
+    """流式中剥离末尾不完整的 [SCENE]、[NEXT]、[IMAGE] 标签。
+    角色对话不使用 [] 方括号，遇到 [SCENE、[NEXT:、[IMAGE 即判定为标签。
+    同时隐藏末尾不完整的标签前缀，避免 token 边界闪烁。"""
     # 剥离完整的 [SCENE]...[/SCENE]
     text = re.sub(r'\s*\[SCENE\].*?\[/SCENE\]', '', text, flags=re.DOTALL)
     # 剥离完整的 [NEXT:Name]
     text = re.sub(r'\s*\[NEXT:[^\]]+\]', '', text)
-    # 剥离末尾不完整的 [SCENE] 片段（tag 已开头但未闭合）
+    # 剥离完整的 [IMAGE:prompt]
+    text = re.sub(r'\s*\[IMAGE:[^\]]+\]', '', text)
+    # 剥离末尾不完整的 [SCENE] 片段
     text = re.sub(r'\s*\[SCENE\](?:(?!\[/SCENE\]).)*$', '', text, flags=re.DOTALL)
     # 剥离末尾不完整的 [NEXT: 片段
     text = re.sub(r'\s*\[NEXT:[^\]]*$', '', text)
-    # 剥离末尾不完整的标签前缀（如 [SCE、[NEX、[S、[N）：
-    # 仅当 [ 后跟的大写字母是 SCENE 或 NEXT 的前缀时才隐藏，避免误伤合法的 [ 字符。
-    # 下一个 token 补全后，要么形成完整标签被上方 regex 剥离，要么不是标签而正常显示。
+    # 剥离末尾不完整的 [IMAGE: 片段
+    text = re.sub(r'\s*\[IMAGE:[^\]]*$', '', text)
+    # 剥离末尾不完整的标签前缀（[SCE、[NEX、[IMA、[S、[N、[I）
     m = re.search(r'\[([A-Z]*)$', text)
     if m and m.group(1):
         prefix = m.group(1)
-        if "SCENE".startswith(prefix) or "NEXT".startswith(prefix):
+        if any(tag.startswith(prefix) for tag in ("SCENE", "NEXT", "IMAGE")):
             text = text[:m.start()].rstrip()
     return text.strip()
 
@@ -180,13 +184,17 @@ def _avatar(initial: str, color: str, radius: int = 16) -> ft.CircleAvatar:
     )
 
 
-def make_bubble_row(entry: dict, state, max_width: float) -> ft.Control:
+def make_bubble_row(entry: dict, state, max_width: float, images_base_dir=None) -> ft.Control:
     """根据 entry.type 渲染气泡行。"""
     msg_type = entry.get("type")
     name = entry.get("name", "")
     dname = entry.get("display_name", name)
     text = entry.get("text", "")
     t = entry.get("time", "")
+
+    # ── 图像消息 ──
+    if msg_type == "image":
+        return make_image_row(entry, max_width, images_base_dir)
 
     # ── 随机事件：居中分割线 ──
     if msg_type == "random_event":
@@ -361,3 +369,114 @@ def make_scene_change_row(scene: dict, max_width) -> ft.Control:
         spacing=4,
         tight=True,
     )
+
+
+def _resolve_thumb_path(entry: dict, images_base_dir=None) -> str:
+    """解析缩略图的完整路径。"""
+    thumb_path = entry.get("thumb_path", "")
+    if not thumb_path:
+        print("[bubble] thumb_path is empty")
+        return ""
+
+    if os.path.isabs(thumb_path):
+        exists = os.path.exists(thumb_path)
+        print(f"[bubble] abs thumb_path: {thumb_path}, exists={exists}")
+        if exists:
+            return thumb_path
+        return ""
+
+    if images_base_dir:
+        full = os.path.join(str(images_base_dir), thumb_path)
+        exists = os.path.exists(full)
+        print(f"[bubble] resolved: {full}, exists={exists}")
+        if exists:
+            return full
+
+    print(f"[bubble] thumb not found: {thumb_path}")
+    return ""
+
+
+def make_image_row(entry: dict, max_width: float, images_base_dir=None) -> ft.Control:
+    image_source = entry.get("image_source", "auto")
+    dname = entry.get("display_name", "插画")
+    prompt_text = entry.get("text", "")
+    t = entry.get("time", "")
+    image_path = entry.get("image_path", "")
+    character = entry.get("character", "")
+
+    thumb_full = _resolve_thumb_path(entry, images_base_dir)
+
+    if image_source == "char" and character:
+        # 角色插画：左对齐，带角色色
+        color = "#7ec8e3"
+        initial = (dname or "?")[0]
+        avatar = _avatar(initial, ft.Colors.SECONDARY)
+        name_row = ft.Row(
+            controls=[
+                ft.Text(dname, size=TEXT_SM, weight=ft.FontWeight.W_600, color=ft.Colors.SECONDARY),
+                _tag("插画", ft.Colors.SECONDARY_CONTAINER, ft.Colors.ON_SECONDARY_CONTAINER),
+                ft.Text(t, size=TEXT_XS, color=ft.Colors.ON_SURFACE_VARIANT),
+            ],
+            spacing=6,
+        )
+        bubble_content = _build_image_bubble(thumb_full, prompt_text, max_width)
+        bubble = _bubble(bubble_content, ft.Colors.SURFACE_CONTAINER_LOW)
+        col = ft.Column(controls=[name_row, bubble], tight=True, spacing=4)
+        return ft.Row(
+            controls=[avatar, col, ft.Container(expand=True)],
+            vertical_alignment=ft.CrossAxisAlignment.START,
+            spacing=10,
+            tight=False,
+        )
+    else:
+        # 场景插图：居中分割线
+        divider_row = ft.Row(
+            controls=[
+                ft.Divider(expand=True, height=1),
+                ft.Text("🎨 场景插图", size=TEXT_XS, weight=ft.FontWeight.W_600,
+                        color=ft.Colors.PRIMARY),
+                ft.Divider(expand=True, height=1),
+            ],
+            spacing=8,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+        bubble_content = _build_image_bubble(thumb_full, prompt_text, max_width)
+        return ft.Column(
+            controls=[divider_row, ft.Container(content=bubble_content, alignment=ft.Alignment.CENTER)],
+            alignment=ft.MainAxisAlignment.CENTER,
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=6,
+            tight=True,
+        )
+
+
+def _build_image_bubble(thumb_path: str, prompt_text: str, max_width: float) -> ft.Control:
+    img_width = min(max_width, 400)
+    if thumb_path and os.path.exists(thumb_path):
+        try:
+            size_kb = os.path.getsize(thumb_path) / 1024
+            print(f"[bubble] loading thumb: {thumb_path} ({size_kb:.0f} KB)")
+            with open(thumb_path, "rb") as f:
+                raw = f.read()
+            image_ctrl = ft.Image(
+                src=raw,
+                fit=BoxFit.CONTAIN,
+                width=img_width,
+                height=img_width * 0.75,
+                border_radius=RADIUS_BUBBLE,
+            )
+        except Exception as ex:
+            print(f"[bubble] image load error: {ex}")
+            image_ctrl = ft.Text(f"图片加载失败: {ex}", size=TEXT_SM, color=ft.Colors.ERROR)
+    else:
+        print(f"[bubble] thumb missing: {thumb_path}")
+        image_ctrl = ft.Text("图片不存在", size=TEXT_SM, italic=True, color=ft.Colors.ON_SURFACE_VARIANT)
+
+    controls = [image_ctrl]
+    if prompt_text:
+        controls.append(ft.Text(
+            prompt_text[:120], size=TEXT_XS, color=ft.Colors.ON_SURFACE_VARIANT,
+            max_lines=3, overflow=ft.TextOverflow.ELLIPSIS, text_align=ft.TextAlign.CENTER,
+        ))
+
+    return ft.Column(controls=controls, tight=True, spacing=4, horizontal_alignment=ft.CrossAxisAlignment.CENTER)

@@ -89,3 +89,45 @@ RANDOM_EVENT_DEFAULTS = {
 # ═══ UI 行为配置 ═══
 BEHAVIOR = app_config.get("behavior", {})
 STREAMING_ENABLED = BEHAVIOR.get("streaming", True)  # 流式输出，默认开启
+
+# ═══ ComfyUI 配置 ═══
+_COMFYUI = app_config.get("comfyui", {})
+COMFYUI_HOST = _COMFYUI.get("host", "127.0.0.1")
+COMFYUI_PORT = _COMFYUI.get("port", 8188)
+COMFYUI_PYTHON_PATH = _COMFYUI.get("python_path", "")
+COMFYUI_MAIN_PATH = _COMFYUI.get("comfyui_path", "")
+COMFYUI_DATA_PATH = _COMFYUI.get("data_path", "")
+COMFYUI_AUTO_START = _COMFYUI.get("auto_start", True)
+COMFYUI_AUTO_CLOSE = _COMFYUI.get("auto_close", True)
+COMFYUI_STARTUP_TIMEOUT = _COMFYUI.get("startup_timeout", 300)
+COMFYUI_GEN_TIMEOUT = _COMFYUI.get("gen_timeout", 600)
+
+# ═══ 图像生成配置 ═══
+_IG = app_config.get("image_gen", {})
+IMAGE_GEN_ENABLED = _IG.get("enabled", False)
+IMAGE_GEN_AUTO_INTERVAL = _IG.get("auto_interval", 6)
+IMAGE_GEN_CHAR_COOLDOWN = _IG.get("char_cooldown", 6)
+IMAGE_GEN_WIDTH = _IG.get("width", 1024)
+IMAGE_GEN_HEIGHT = _IG.get("height", 1024)
+IMAGE_GEN_STEPS = _IG.get("steps", 8)
+IMAGE_GEN_CFG = _IG.get("cfg", 5.0)
+
+# ═══ ComfyUI 模型配置 ═══
+_COMFY_MODELS = app_config.get("models", {})
+COMFY_MODEL_DIFFUSION = _COMFY_MODELS.get("diffusion", "flux-2-klein-9b-fp8.safetensors")
+COMFY_MODEL_CLIP = _COMFY_MODELS.get("clip", "qwen_3_8b_fp8mixed.safetensors")
+COMFY_MODEL_VAE = _COMFY_MODELS.get("vae", "flux2-vae.safetensors")
+
+# ═══ 工作流模板配置 ═══
+_WF = app_config.get("workflow", {})
+WORKFLOW_PATH = _WF.get("path", "")
+
+# 手动节点 ID 覆盖（兜底用，默认空 = 自动检测 / 内置硬编码）
+WORKFLOW_NODE_OVERRIDES = _WF.get("node_overrides", {})
+# 格式示例: {"positive_prompt": "12", "sampler": "5", "negative_prompt": "13", ...}
+
+
+def get_workflow_path():
+    if WORKFLOW_PATH and Path(WORKFLOW_PATH).exists():
+        return Path(WORKFLOW_PATH)
+    return ASSETS_DIR / "simple_api_workflow.json"
