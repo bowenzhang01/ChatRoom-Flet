@@ -88,6 +88,27 @@ Nine gradient color themes spanning the full spectrum from crimson to violet. Ea
 |:---:|:---:|:---:|:---:|:---:|
 | Sky · Sky Blue | Crimson · Red→Rose | Star · Blue→Purple | Rainbow · Full Spectrum | — |
 
+### 🧠 Long-Term Memory & Dialogue Enhancements
+
+- **Long-term memory** — Once the conversation accumulates enough new content, a summary is auto-generated and injected as a `[Memory]` block, keeping characters consistent and the story coherent across long sessions (triggered roughly every 12 turns / 6 new messages)
+- **Silent characters** — AI characters may output `[SILENT]` to quietly listen instead of speaking, avoiding endless chatter; but if directly addressed or asked a question, they respond immediately
+- **System messages** — Actions like "skip turn" leave a centered system note in the chat flow, keeping the narrative coherent
+- **Streaming tag stripping** — `[SCENE]` / `[NEXT]` / `[IMAGE]` / `[SILENT]` tags are fully filtered during streaming rendering, never flickering inside the bubbles
+
+### 🖼️ Image Generation Mode (ComfyUI)
+
+Characters can auto-generate illustrations (1024×1024, Flux-2-Klein model) alongside their lines. Auto-interval and per-character cooldown are configurable in Settings; generated images are stored with the conversation.
+
+> ⚠️ **Most users may find this feature difficult or impossible to use**, because:
+>
+> 1. **Requires a local ComfyUI install** — images are produced by a local ComfyUI process launched by the app; there is no cloud image API
+> 2. **Requires an NVIDIA GPU** (≥ 8GB VRAM recommended) — Flux-2-Klein 9B is an fp8-quantized large model; integrated graphics won't cut it
+> 3. **10GB+ of model downloads** — diffusion model + CLIP + VAE, requiring access to HuggingFace
+> 4. **Manual local path config** — fill in `python_path` / `comfyui_path` / `data_path` etc. under the `comfyui` section of `config.json`
+> 5. **Slow generation** — ~10s per image on an RTX GPU, slower on weaker cards; heavy VRAM/CPU usage while generating
+
+The feature is **off by default** (`image_gen.enabled: false`) and does not affect chat functionality in any way. Users without such a setup can simply ignore it.
+
 ### 🔒 Security
 
 - **Environment variable priority**: `DEEPSEEK_API_KEY` / `OPENAI_API_KEY` env vars > `config.json` — prevents key leakage to Git
@@ -112,7 +133,8 @@ chatroom/
 │   ├── chat_manager.py        # Archive management (read/write/auto-save/recovery)
 │   ├── data_manager.py        # Profile CRUD (characters, scenes, config)
 │   ├── events.py              # EventBus
-│   └── debug.py               # Debug tools (enable with DEBUG=dorm)
+│   ├── debug.py               # Debug tools (enable with DEBUG=dorm)
+│   └── image_generator.py     # ComfyUI image generator (subprocess mgmt/workflow injection)
 │
 ├── services/                  # Service layer
 │   ├── api_service.py         # LLM HTTP (sync/async/SSE streaming)
@@ -134,7 +156,7 @@ chatroom/
 │   ├── dorm_life/             # Girls' Dorm Daily (5 chars + 4 scenes)
 │   └── starship/              # Starship (5 chars + 5 scenes)
 │
-└── assets/                    # Fonts & static assets
+└── assets/                    # Fonts & static assets + ComfyUI workflow template
 ```
 
 ### Design Highlights
@@ -185,12 +207,13 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Only two core dependencies:
+Only three core dependencies:
 
 | Package | Version | Purpose |
 |:---|:---|:---|
 | `flet` | ≥ 0.24.0 | UI framework, installs `flet` CLI tool |
 | `httpx` | ≥ 0.28.0 | HTTP client for LLM API calls (including SSE streaming) |
+| `Pillow` | ≥ 10.0.0 | Image processing (thumbnails for image generation mode; ignorable without GPU) |
 
 ### 4. Configure API Key
 
@@ -398,6 +421,7 @@ Go to Profiles → click "✨ AI Create" → enter a description (e.g. "A cyberp
 | UI | [Flet](https://flet.dev) | Flutter in Python |
 | Network | [httpx](https://www.python-httpx.org) | HTTP + SSE streaming |
 | AI | DeepSeek API | OpenAI-compatible |
+| Image Gen | ComfyUI (local, optional) | Flux-2-Klein · requires NVIDIA GPU |
 | Font | Noto Sans SC | CJK rendering |
 | Packaging | Flet build | Multi-platform one-click build |
 
@@ -413,6 +437,8 @@ Key milestones:
 - **Streaming output** — SSE token-by-token rendering, toggleable mid-session
 - **AI generation refactored** — Single API call → multi-phase parallel + progress tracking
 - **9-color themes** — Single Indigo → full spectrum coverage
+- **Image generation (ComfyUI)** — Auto illustrations during dialogue via local Flux-2-Klein
+- **Long-term memory & silent characters** — `[Memory]` auto-summaries, `[SILENT]` mechanism, system messages
 
 ---
 

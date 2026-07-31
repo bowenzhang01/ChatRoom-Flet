@@ -88,6 +88,27 @@ ChatRoom 的前身是 Kivy 桌面应用 [ChatRoom](https://github.com/bowenzhang
 |:---:|:---:|:---:|:---:|:---:|
 | 碧落 · 天蓝 | 赤霞 · 红→玫 | 星夜 · 蓝→紫 | 虹光 · 全光谱 | — |
 
+### 🧠 长程记忆 & 对话增强
+
+- **长程记忆** — 对话积累到阈值后自动生成摘要，以 `[Memory]` 块注入后续 prompt，让角色在长对话中保持人物一致性和剧情连贯（默认约每 12 轮 / 新增 6 条内容触发一次摘要）
+- **角色安静机制** — AI 角色可以输出 `[SILENT]` 选择安静旁听，避免全员不停说话；但如果被直接点名或提问，角色会立刻开口回应
+- **系统消息** — 「跳过发言」等操作会以居中系统提示的形式留在对话流中，保证叙事连贯
+- **流式标签剥离** — `[SCENE]` / `[NEXT]` / `[IMAGE]` / `[SILENT]` 标签在流式渲染时被完整过滤，不会在气泡中闪烁残留
+
+### 🖼️ 图片生成模式（ComfyUI）
+
+角色发言时可以自动生成配图（1024×1024，Flux-2-Klein 模型），设置页可调节自动间隔与角色冷却时间，生成结果自动存入对话记录。
+
+> ⚠️ **绝大多数用户可能难以使用此功能**，原因如下：
+>
+> 1. **需要本地部署 ComfyUI** — 图像由应用自动拉起的本地 ComfyUI 进程生成，不依赖任何云端图像 API
+> 2. **需要 NVIDIA 独立显卡**（建议 ≥ 8GB 显存）— Flux-2-Klein 9B 是 fp8 量化的大模型，核显/无独显机器无法运行
+> 3. **需要手动下载 10GB+ 的模型文件** — diffusion 主模型 + CLIP + VAE 三个文件，且需能访问 HuggingFace
+> 4. **需要手动配置本地路径** — 在 `config.json` 的 `comfyui` 段填写 `python_path` / `comfyui_path` / `data_path` 等字段
+> 5. **生成较慢** — RTX 显卡下每张约 10 秒，性能较低的卡更慢；生成期间会占用大量显存和 CPU
+
+该功能**默认关闭**（`image_gen.enabled: false`），不影响任何聊天功能。没有上述环境的用户直接忽略即可。
+
 ### 🔒 安全性
 
 - **API Key 环境变量优先**：`DEEPSEEK_API_KEY` / `OPENAI_API_KEY` 环境变量 > config.json，避免密钥泄露到 Git
@@ -112,7 +133,8 @@ chatroom/
 │   ├── chat_manager.py        # 存档管理（读写/自动存档/恢复）
 │   ├── data_manager.py        # 剧本 CRUD（角色/场景/配置）
 │   ├── events.py              # EventBus 事件总线
-│   └── debug.py               # 调试工具（DEBUG=dorm 启用）
+│   ├── debug.py               # 调试工具（DEBUG=dorm 启用）
+│   └── image_generator.py     # ComfyUI 图像生成器（子进程管理/工作流注入）
 │
 ├── services/                  # 服务层
 │   ├── api_service.py         # LLM HTTP（同步/异步/SSE 流式）
@@ -134,7 +156,7 @@ chatroom/
 │   ├── dorm_life/             # 女生寝室·日常（5 角色 + 4 场景）
 │   └── starship/              # 星际飞船（5 角色 + 5 场景）
 │
-└── assets/                    # 字体等静态资源
+└── assets/                    # 字体等静态资源 + ComfyUI 工作流模板
 ```
 
 ### 设计特点
@@ -185,12 +207,13 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-核心依赖很简单，只有两个：
+核心依赖很简单，只有三个：
 
 | 包 | 版本 | 作用 |
 |:---|:---|:---|
 | `flet` | ≥ 0.24.0 | UI 框架，安装后自带 `flet` CLI 工具 |
 | `httpx` | ≥ 0.28.0 | HTTP 客户端，用于调用 LLM API（含 SSE 流式传输） |
+| `Pillow` | ≥ 10.0.0 | 图像处理（图片生成模式的缩略图制作，无 GPU 环境可忽略） |
 
 > 💡 国内网络慢？用清华镜像：`pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple`
 
@@ -403,6 +426,7 @@ flet build web \
 | UI | [Flet](https://flet.dev) | Flutter in Python |
 | 网络 | [httpx](https://www.python-httpx.org) | HTTP + SSE 流式 |
 | AI | DeepSeek API | OpenAI 兼容接口 |
+| 图像生成 | ComfyUI（本地，可选） | Flux-2-Klein · 需 NVIDIA GPU |
 | 字体 | Noto Sans SC | 中文渲染 |
 | 打包 | Flet build | 多平台一键构建 |
 
@@ -418,6 +442,8 @@ flet build web \
 - **流式输出** — SSE 逐 token 渲染，支持中途开关
 - **AI 生成重构** — 单次 API 调用 → 多阶段并行 + 进度追踪
 - **九色主题** — 单一 Indigo → 覆盖全光谱
+- **图像生成（ComfyUI）** — 对话自动配图，本地 Flux-2-Klein 模型
+- **长程记忆 & 角色安静** — `[Memory]` 自动摘要、`[SILENT]` 安静机制、系统消息
 
 ---
 
