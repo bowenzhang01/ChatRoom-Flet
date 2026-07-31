@@ -62,7 +62,7 @@ class AIEngine:
         """构建角色发言 prompt。"""
         char = self.app.characters.get(name, {})
         scene = self._get_scene_text()
-        recent = self.app.history_snapshot()[-8:] if self.app.history else []
+        recent = self.app.history_snapshot()[-self.app.history_size:] if self.app.history else []
         lines = []
         for m in recent:
             if m.get("type") == "director":
@@ -72,6 +72,8 @@ class AIEngine:
             elif m.get("type") == "random_npc":
                 npc_name = m.get("display_name", "路人")
                 lines.append(f"(Passerby {npc_name} says): {m['text']}")
+            elif m.get("type") == "system":
+                lines.append(f"(System - {m.get('text', '')})")
             else:
                 dname = m.get("display_name", m["name"])
                 lines.append(f"{dname}: {m['text']}")
@@ -91,11 +93,21 @@ class AIEngine:
             )
 
         return (
-            f"{scene}{user_note}\n\n[Recent]\n{dialogue}\n\n"
+            f"{scene}{user_note}\n\n"
+            f"{self._memory_block()}"
+            f"[Recent]\n{dialogue}\n\n"
             f"[Your turn - {char.get('display_name', name)}]\n"
             f"Respond naturally. Describe what you do."
             + self._build_output_hints(name)
+            + self._build_silent_hint(name)
         )
+
+    def _memory_block(self) -> str:
+        """构建 [Memory] 块（长程记忆摘要）。无摘要时返回空串。"""
+        mem = getattr(self.app, "_memory_summary", "") or ""
+        if not mem:
+            return ""
+        return f"[Memory]\n{mem}\n\n"
 
     def _build_output_hints(self, current_speaker: str) -> str:
         """动态模式追加 [NEXT] 提示；动态场景追加 [SCENE] 提示；图像模式追加 [IMAGE] 提示。"""
@@ -134,6 +146,84 @@ class AIEngine:
             )
 
         return "".join(parts)
+
+    def _is_directly_addressed(self, text: str, name: str, dname: str) -> bool:
+        """粗略判断角色是否被直接点名/提问（此时不允许安静）。
+
+        仅当名字出现在最近 60 字内，且消息带提问/呼唤句式时才算"被点名"；
+        一般性的提及（如回忆往事时提到名字）不阻止安静。
+        """
+        if not text:
+            return False
+        tail = text[-60:]
+        if (name not in tail) and (dname not in tail):
+            return False
+        if any(q in text for q in ("？", "?", "怎么样", "觉得", "怎么办", "回答", "问你", "想听")):
+            return True
+        if re.search(r'[「“]\s*' + re.escape(dname) + r'[，。！？」"]', text):
+            return True
+        return False
+
+    def _build_silent_hint(self, current_speaker: str) -> str:
+        """角色可安静：[SILENT] 条件提示。
+
+        - 被直接点名/提问 → 必须回应，不给安静选项
+        - 3+ 角色且上一位未安静 → 允许 [SILENT]
+        - 上一位已安静 → 本回合不提供安静选项，避免连续冷场
+        - 距上次安静过久（≥10 轮）→ 强力建议安静一次
+        """
+        last_msg = self.app.history[-1] if self.app.history else None
+        if not last_msg:
+            return ""
+        last_text = last_msg.get("text", "")
+        last_silent = bool(last_msg.get("silent"))
+        char = self.app.characters.get(current_speaker, {})
+        dname = char.get("display_name", current_speaker)
+        if self._is_directly_addressed(last_text, current_speaker, dname):
+            print(f"[silent] {current_speaker}: 被点名 → 必须回应")
+            return (
+                f"\n\nYou were just directly addressed or asked something — "
+                f"you MUST respond. Do NOT use [SILENT]."
+            )
+
+        if len(self.app._get_effective_order()) < 3:
+            return ""
+        if last_silent:
+            print(f"[silent] {current_speaker}: 上一位已安静 → 不鼓励连续安静")
+            return (
+                f"\n\nThe previous speaker chose to stay quiet. If you have something "
+                f"to say, continue or advance the scene — try not to stay quiet twice in a row."
+            )
+
+        # 距上次安静过久 → 强力提示（保证对话中偶尔出现安静）
+        turns_since_silent = (self.app.turn_count - self.app._last_silent_turn
+                              if self.app._last_silent_turn >= 0 else self.app.turn_count)
+        if turns_since_silent >= 10:
+            print(f"[silent] {current_speaker}: 已 {turns_since_silent} 轮无人安静 → 强烈建议 [SILENT]")
+            return (
+                f"\n\nIt has been a long time since anyone in this conversation stayed quiet. "
+                f"Staying quiet is natural and welcome here. If right now you have nothing "
+                f"important to add, reply with ONLY the tag [SILENT] — no dialogue, no actions. "
+                f"Otherwise respond normally."
+            )
+
+        print(f"[silent] {current_speaker}: 允许安静（可输出 [SILENT]）")
+        return (
+            f"\n\nStaying quiet is allowed and natural in this conversation — not every turn "
+            f"needs words. If the topic is exhausted and you have nothing meaningful to add "
+            f"right now, reply with ONLY the tag [SILENT] to stay quiet. "
+            f"About 1 in 4 turns silence fits naturally; do not force conversation. "
+            f"A silent turn is JUST the bare tag [SILENT] — no dialogue, no actions. "
+            f"Do NOT include [SILENT] inside your dialogue."
+        )
+
+    def _parse_and_strip_silent_tag(self, text: str):
+        """解析并剥离 [SILENT] 标签（不区分大小写，兼容全角【】括号）。
+        返回 (clean_text, silent_or_False)。"""
+        if not re.search(r'[\[【]\s*SILENT\s*[\]】]', text, re.IGNORECASE):
+            return (text, False)
+        clean = re.sub(r'\s*[\[【]\s*SILENT\s*[\]】]', '', text, flags=re.IGNORECASE).strip()
+        return (clean, True)
 
     # ═══ LLM 调用 ═══
 
@@ -283,9 +373,9 @@ class AIEngine:
     # ═══ 标签解析（[SCENE] / [NEXT] / [IMAGE]）═══
 
     def _parse_and_strip_scene_tag(self, text: str):
-        """解析并剥离所有 [SCENE]...[/SCENE] 标签。
+        """解析并剥离所有 [SCENE]...[/SCENE] 标签（不区分大小写）。
         返回 (clean_text, scene_dict_or_None)。取最后一个作为有效场景。"""
-        scene_matches = list(re.finditer(r'\[SCENE\](.+?)\[/SCENE\]', text, re.DOTALL))
+        scene_matches = list(re.finditer(r'\[SCENE\](.+?)\[/SCENE\]', text, re.DOTALL | re.IGNORECASE))
         if not scene_matches:
             return (text, None)
         m = scene_matches[-1]
@@ -318,25 +408,27 @@ class AIEngine:
         return {"time": "", "location": "", "scene": content}
 
     def _parse_and_strip_next_tag(self, text: str):
-        """解析并剥离 [NEXT:Name] 标签。
+        """解析并剥离 [NEXT:Name] 标签（不区分大小写）。
         取最后一个 [NEXT] 建议，剥离所有出现的标签。
         返回 (clean_text, next_name_or_None)。"""
-        matches = re.findall(r'\[NEXT:([^\]]+)\]', text)
+        matches = re.findall(r'\[NEXT:([^\]]+)\]', text, re.IGNORECASE)
         if not matches:
             return (text, None)
         next_name = matches[-1].strip()
-        clean = re.sub(r'\s*\[NEXT:[^\]]+\]', '', text).strip()
+        clean = re.sub(r'\s*\[NEXT:[^\]]+\]', '', text, flags=re.IGNORECASE).strip()
         return (clean, next_name)
 
+    _IMAGE_TAG_RE = re.compile(r'\s*\[IMAGE\s*[:：]\s*([^\]]+)\]', re.IGNORECASE)
+
     def _parse_and_strip_image_tag(self, text: str):
-        """解析并剥离 [IMAGE:...] 标签。
+        """解析并剥离 [IMAGE:...] 标签（不区分大小写，兼容全角冒号/空格）。
         取最后一个 [IMAGE] 的 prompt，剥离所有出现的标签。
         返回 (clean_text, image_prompt_or_None)。"""
-        matches = re.findall(r'\[IMAGE:([^\]]+)\]', text)
+        matches = self._IMAGE_TAG_RE.findall(text)
         if not matches:
             return (text, None)
         image_prompt = matches[-1].strip()
-        clean = re.sub(r'\s*\[IMAGE:[^\]]+\]', '', text).strip()
+        clean = self._IMAGE_TAG_RE.sub('', text).strip()
         print(f"[image] tag detected from char: {image_prompt[:80]}...")
         return (clean, image_prompt)
 
@@ -399,7 +491,7 @@ class AIEngine:
             f"只涉及环境/外部因素，不涉及在场角色的具体行为。\n"
             f"如果是'NPC'：生成一个不在上述角色列表中的临时路人。"
             f"给出名字（2-4字中文）、一句话简介，以及一句符合身份的对话（20-40字）。\n\n"
-            f"只返回纯JSON，不要```代码块：\n"
+            f"只返回单个JSON对象，不要数组、不要```代码块、不要其他文字：\n"
             f'事件: {{"type":"event","text":"..."}}\n'
             f'NPC: {{"type":"npc","name":"...","desc":"...","dialogue":"..."}}'
         )
@@ -409,11 +501,11 @@ class AIEngine:
         npc_name = npc.get("name", "路人")
         npc_desc = npc.get("desc", "一个经过的路人")
         scene = self._get_scene_text()
-        recent = self.app.history[-6:] if self.app.history else []
+        recent = self.app.history[-self.app.history_size:] if self.app.history else []
         lines = []
         for m in recent:
             dname = m.get("display_name", m["name"])
-            if m.get("type") in ("director", "random_event"):
+            if m.get("type") in ("director", "random_event", "system"):
                 continue
             lines.append(f"{dname}: {m['text']}")
         dialogue = "\n\n".join(lines) if lines else "(无人发言)"
@@ -421,6 +513,7 @@ class AIEngine:
         if is_intro:
             return (
                 f"{scene}\n\n"
+                f"{self._memory_block()}"
                 f"[Recent]\n{dialogue}\n\n"
                 f"[Your turn - {npc_name}]\n"
                 f"你是一个路人: {npc_desc}。你刚刚路过这里，注意到在场的角色们。"
@@ -429,6 +522,7 @@ class AIEngine:
             )
         return (
             f"{scene}\n\n"
+            f"{self._memory_block()}"
             f"[Recent]\n{dialogue}\n\n"
             f"[Your turn - {npc_name}]\n"
             f"你是一个路人: {npc_desc}。"
@@ -437,7 +531,10 @@ class AIEngine:
         )
 
     def _generate_random_event(self):
-        """生成随机事件/NPC。返回 dict 或 None。"""
+        """生成随机事件/NPC。返回 dict 或 None。
+
+        对模型返回做归一化：允许 JSON 数组（取首个元素）、
+        type 大小写/中文变体（"NPC"/"路人"/"事件"）统一为 "npc"/"event"。"""
         print("[random_event] generating...")
         prompt = self._build_random_event_prompt()
         try:
@@ -447,11 +544,20 @@ class AIEngine:
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.9,
-                max_tokens=300,
+                max_tokens=500,
             )
             result, err = extract_json(content)
-            if result:
-                print(f"[random_event] AI returned: type={result.get('type')} "
+            if isinstance(result, list) and result:
+                result = result[0]
+            if isinstance(result, dict):
+                etype = str(result.get("type", "")).lower()
+                if etype in ("npc", "路人", "过客"):
+                    result["type"] = "npc"
+                    if not result.get("name"):
+                        result["name"] = "路人"
+                else:
+                    result["type"] = "event"
+                print(f"[random_event] AI returned: type={result['type']} "
                       f"text={result.get('text', result.get('dialogue', ''))[:60]}...")
                 return result
             print(f"[random_event] JSON parse failed: {err}")
@@ -594,6 +700,18 @@ class AIEngine:
             return (None, str(e))
 
     # ═══ 对话标题生成（供 ChatManager 调用）═══
+
+    def build_memory_summary_prompt(self, existing: str, chunk_lines: str) -> str:
+        """构建长程记忆摘要 prompt：旧摘要 + 新片段 → 合并后的新摘要。"""
+        existing_block = f"【已有记忆摘要】\n{existing}\n\n" if existing else ""
+        return (
+            f"你是一个对话记忆整理器。以下是角色扮演对话的一部分。\n\n"
+            f"{existing_block}"
+            f"【新增对话片段】\n{chunk_lines}\n\n"
+            f"请把新增片段与已有摘要合并，生成一份新的中文记忆摘要（80-160字），"
+            f"保留：重要人物关系、未完成的话题、关键事件、角色的重要言行。\n"
+            f"只返回摘要文本本身，不要任何解释或格式标记。"
+        )
 
     def build_chat_title_prompt(self) -> str:
         """构建对话标题生成 prompt。"""

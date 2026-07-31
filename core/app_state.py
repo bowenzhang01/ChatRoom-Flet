@@ -65,6 +65,7 @@ class AppState:
         self.turn_count: int = 0
         self.mode: str = "round"  # round | random | dynamic
         self.speed: int = 3
+        self.history_size: int = 8  # prompt 使用的最近对话条数
 
         # ── 对话历史 ──
         self.history = deque(maxlen=500)
@@ -79,11 +80,18 @@ class AppState:
         # ── 运行时状态 ──
         self.running: bool = False
         self.paused: bool = False
+        self._streaming_active: bool = False  # 正在流式输出（暂停时提示用）
         self._char_load_errors: list = []
 
         # ── 动态发言追踪 ──
         self._char_last_turn: dict = {}
         self._suggested_next: Optional[str] = None
+
+        # ── 长程记忆（滚动摘要，见 dialogue_loop._maybe_update_memory_summary）──
+        self._memory_summary: str = ""
+        self._memory_cursor: int = 0
+        self._last_summary_turn: int = 0
+        self._summary_generating: bool = False
 
         # ── 随机事件 / NPC 状态 ──
         self._last_random_event_turn: int = 0
@@ -97,7 +105,12 @@ class AppState:
         self.image_gen_auto_interval: int = config.IMAGE_GEN_AUTO_INTERVAL
         self.image_gen_char_cooldown: int = config.IMAGE_GEN_CHAR_COOLDOWN
         self._last_image_turn: int = -1
+        self._last_auto_image_turn: int = -1  # 自动配图独立冷却
+        self._last_char_image_turn: int = -1  # 角色请求配图独立冷却
         self._auto_image_counter: int = 0
+
+        # ── 安静（[SILENT]）追踪 ──
+        self._last_silent_turn: int = -1
 
     # ═══ 便捷方法 ═══
 

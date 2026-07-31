@@ -24,6 +24,7 @@ ChatRoom - Flet Edition · 事件总线
     "stopped"          → 对话已停止/重置
     "saved"            → 对话已保存 (val={title, success})
     "autosave_prompt"  → 启动时检测到自动存档 (val={title, message_count, path})
+    "snack"            → 轻量提示 (val=str)
 """
 
 import threading

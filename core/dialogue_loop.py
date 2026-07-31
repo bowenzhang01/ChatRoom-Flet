@@ -25,6 +25,13 @@ from core.events import EventBus
 from services.api_service import APIError
 import config
 
+# 角色选择安静（[SILENT]）时的动作注模板
+_SILENT_ACTIONS = [
+    "*安静地听着*",
+    "*默默点了点头*",
+    "*在一旁安静地喝了一口茶*",
+]
+
 
 class DialogueLoop:
     """对话循环控制器。
@@ -37,6 +44,11 @@ class DialogueLoop:
       send_director_note(text)  → 注入导演提示
       send_user_message(text)   → 注入用户角色发言
     """
+
+    # 长程记忆摘要参数
+    _SUMMARY_MIN_GAP = 12      # 距上次摘要的最小轮数间隔
+    _SUMMARY_MIN_NEW = 6       # 至少积累多少条未覆盖新片段才触发
+    _SUMMARY_CHUNK_LIMIT = 40  # 单次摘要最多覆盖的片段条数
 
     def __init__(self, app):
         self.app = app
@@ -93,6 +105,12 @@ class DialogueLoop:
             self.bus.emit("api_error_stop", "未配置 API Key，请在设置中填写")
             return
 
+        # 检查发言顺序：无有效发言人时启动只会静默空转，直接拦截并提示
+        if not self.app._get_effective_order():
+            self.bus.emit("set_status", "没有可发言的角色")
+            self.bus.emit("snack", "没有可发言的角色，请先添加角色或开启用户模式")
+            return
+
         # 初始化场景（动态模式从预设取首个场景）
         if self.app.dynamic_scene_enabled and self.app.scenes and not self.app.current_scene:
             s = self.app.scenes[self.app.scene_idx % len(self.app.scenes)]
@@ -111,6 +129,16 @@ class DialogueLoop:
         self.app._npc_silent_turns = 0
         self.app._npc_rounds_left = 0
         self.app._char_turns_since_event = 0
+        self.app._streaming_active = False
+        self.app._memory_summary = ""
+        self.app._memory_cursor = 0
+        self.app._last_summary_turn = 0
+        self.app._summary_generating = False
+        self.app._last_silent_turn = -1
+        self.app._last_auto_image_turn = -1
+        self.app._last_char_image_turn = -1
+        self.app._last_image_turn = -1
+        self.app._auto_image_counter = 0
         self.ai._api_error_count = 0
 
         self._stop_event.clear()
@@ -132,7 +160,10 @@ class DialogueLoop:
         self.app.paused = True
         self._paused.clear()
         self.bus.emit("paused", None)
-        self.bus.emit("set_status", "已暂停")
+        if self.app._streaming_active:
+            self.bus.emit("set_status", "当前发言完成后暂停…")
+        else:
+            self.bus.emit("set_status", "已暂停")
         # 暂停时自动存档
         self.app.chat._auto_save()
         # 导演模式开启时，UI 层监听 paused 事件显示输入栏
@@ -182,7 +213,13 @@ class DialogueLoop:
         self.app._npc_silent_turns = 0
         self.app._npc_rounds_left = 0
         self.app._char_turns_since_event = 0
+        self.app._streaming_active = False
+        self.app._memory_summary = ""
+        self.app._memory_cursor = 0
+        self.app._last_summary_turn = 0
+        self.app._summary_generating = False
         self._waiting_for_user = False
+        print("[memory] 已重置（stop）")
         self.app.chat._loaded_chat_path = None
         self.app.chat._last_saved_count = -1  # 重置：下次有消息即视为未保存
         self.app.chat._last_autosave_len = 0
@@ -197,6 +234,7 @@ class DialogueLoop:
 
     def set_speed(self, speed: int):
         self.app.speed = max(1, min(10, speed))
+        print(f"[loop] 速度 -> {self.app.speed}")
 
     def set_mode(self, mode: str):
         """mode: 'round' | 'random' | 'dynamic'"""
@@ -262,12 +300,22 @@ class DialogueLoop:
         self._user_turn_event.set()
 
     def skip_user_turn(self):
-        """用户跳过自己的回合。"""
+        """用户跳过自己的回合。跳过动作会在对话中留下系统痕迹，保证叙事连贯。"""
         self._waiting_for_user = False
         self.app.turn_idx += 1
         self.app.turn_count += 1
         self._user_input_text = None
         self._user_input_skip = True
+        entry = {
+            "name": "__system__",
+            "display_name": "系统",
+            "text": "（你跳过了发言）",
+            "time": datetime.now().strftime("%H:%M:%S"),
+            "type": "system",
+        }
+        with self.app._history_lock:
+            self.app.history.append(entry)
+        self.bus.emit("msg", entry)
         self._user_turn_event.set()
 
     # ═══ 后台循环 ═══
@@ -305,6 +353,9 @@ class DialogueLoop:
                 if self._stop_event.is_set():
                     break
 
+                # 长程记忆：后台滚动摘要（不阻塞对话）
+                self._maybe_update_memory_summary()
+
                 # ═══ 随机事件 / NPC 注入（在角色发言前）═══
                 if self.app.random_event_enabled:
                     if self._handle_npc_logic(current_thread):
@@ -318,6 +369,7 @@ class DialogueLoop:
                             self._emit_random_result(result)
                         else:
                             print("[random_event] generation failed, skipping")
+                            self.bus.emit("snack", "随机事件生成失败，已跳过")
                             self.app._char_turns_since_event = 0
                         self.bus.emit("set_status", "运行中")
                         time.sleep(0.2)
@@ -330,7 +382,12 @@ class DialogueLoop:
                     continue
 
                 if self.app.mode == "random":
-                    name = random.choice(effective_order)
+                    # 轻量防连说：避免同一角色连续发言
+                    last_speaker = ""
+                    if self.app.history:
+                        last_speaker = self.app.history[-1].get("name", "")
+                    candidates = [n for n in effective_order if n != last_speaker]
+                    name = random.choice(candidates or effective_order)
                 elif self.app.mode == "dynamic":
                     name = self.ai._pick_next_speaker_rules()
                     if not name:
@@ -345,7 +402,11 @@ class DialogueLoop:
                     self._paused.clear()
                     self.bus.emit("user_turn", None)
                     self.bus.emit("set_status", "轮到你了～")
-                    self._user_turn_event.wait()
+                    # 等待用户输入，每 20s 提醒一次（不自动跳过，保持对话自主权）
+                    while not self._user_turn_event.wait(timeout=20.0):
+                        if self._stop_event.is_set():
+                            break
+                        self.bus.emit("set_status", "还在等你发言～（可输入发言或点「跳过」）")
                     self._user_turn_event.clear()
                     if self._stop_event.is_set():
                         break
@@ -354,6 +415,10 @@ class DialogueLoop:
                     self.bus.emit("resumed", None)
                     self.bus.emit("set_status", "运行中")
                     continue
+
+                if self.app.mode != "dynamic":
+                    print(f"[loop] 轮到 {name} 发言 (turn_idx={self.app.turn_idx} "
+                          f"turn_count={self.app.turn_count})")
 
                 # ═══ 调 LLM ═══
                 st = self.app.char_styles.get(name, {})
@@ -386,6 +451,7 @@ class DialogueLoop:
 
                     raw_buf = []
                     last_flush = 0.0
+                    self.app._streaming_active = True
 
                     def on_token(tok):
                         nonlocal last_flush
@@ -413,8 +479,19 @@ class DialogueLoop:
                                 return
                             self.bus.emit("set_status", f"API 错误: {error}")
 
-                        # 解析 [SCENE] / [NEXT] / [IMAGE] 标签
+                        # 解析 [SILENT]（置于其它标签之前：安静回合无场景/点名/图像）
+                        silent = False
                         text = reply
+                        text, silent = self.ai._parse_and_strip_silent_tag(text)
+                        if silent:
+                            self.app._last_silent_turn = self.app.turn_count
+                            print(f"[silent] {name} 选择安静"
+                                  + ("（纯标签）" if not text else f"（标签+台词: {text[:30]}）"))
+                        if silent and not text:
+                            text = random.choice(_SILENT_ACTIONS)
+                            entry["silent"] = True
+
+                        # 解析 [SCENE] / [NEXT] / [IMAGE] 标签
                         if self.app.dynamic_scene_enabled:
                             text, scene_dict = self.ai._parse_and_strip_scene_tag(text)
                             if scene_dict:
@@ -432,8 +509,12 @@ class DialogueLoop:
                         text = text.strip()
                     finally:
                         entry["streaming"] = False
-                        if text:
-                            entry["text"] = text
+                        self.app._streaming_active = False
+                        # 始终写入最终文本（含空字符串）：否则回复仅含标签时，
+                        # entry["text"] 会残留带标签的原始流式文本，气泡中可见提示词
+                        if not text and image_prompt:
+                            text = "（提议为这一刻画一张插画）"
+                        entry["text"] = text
                         self.bus.emit("msg_end", dict(entry))
 
                     if self.app.image_gen_enabled and image_prompt and self._should_trigger_char_image():
@@ -454,8 +535,20 @@ class DialogueLoop:
                             return
                         self.bus.emit("set_status", f"API 错误: {error}")
 
-                    # 解析 [SCENE] / [NEXT] / [IMAGE] 标签
+                    # 解析 [SILENT]（置于其它标签之前：安静回合无场景/点名/图像）
+                    silent = False
+                    silent_note = None
                     text = reply
+                    text, silent = self.ai._parse_and_strip_silent_tag(text)
+                    if silent:
+                        self.app._last_silent_turn = self.app.turn_count
+                        print(f"[silent] {name} 选择安静"
+                              + ("（纯标签）" if not text else f"（标签+台词: {text[:30]}）"))
+                    if silent and not text:
+                        silent_note = random.choice(_SILENT_ACTIONS)
+                        text = silent_note
+
+                    # 解析 [SCENE] / [NEXT] / [IMAGE] 标签
                     if self.app.dynamic_scene_enabled:
                         text, scene_dict = self.ai._parse_and_strip_scene_tag(text)
                         if scene_dict:
@@ -477,6 +570,8 @@ class DialogueLoop:
                         "text": text.strip(),
                         "time": datetime.now().strftime("%H:%M:%S"),
                     }
+                    if silent and silent_note:
+                        entry["silent"] = True
                     with self.app._history_lock:
                         self.app.history.append(entry)
                     self.app.turn_idx += 1
@@ -491,12 +586,14 @@ class DialogueLoop:
                         self._do_image_generation(image_prompt, source="char", character=name)
 
                 # 等待（速度控制），每 0.1s 检查暂停
+                # 注意：不能用 _paused.wait(0.1) —— Event 已 set 时 wait() 立即返回，
+                # 会导致速度等待完全失效。用 time.sleep(0.1) 才能真正产生间隔。
                 total = self.app.speed * 0.1
                 elapsed = 0.0
                 while elapsed < total and not self._stop_event.is_set():
-                    self._paused.wait(0.1)
                     if not self._paused.is_set():
                         break
+                    time.sleep(0.1)
                     elapsed += 0.1
 
                 # 自动图像生成检查
@@ -510,6 +607,78 @@ class DialogueLoop:
             except Exception as e:
                 print(f"[loop] 异常: {e}")
                 time.sleep(0.5)
+
+    # ═══ 长程记忆（滚动摘要）═══
+
+    def _maybe_update_memory_summary(self):
+        """把比 prompt 窗口更旧的历史异步压缩进 _memory_summary。
+
+        触发条件：未生成中 + 距上次 ≥ _SUMMARY_MIN_GAP 轮 +
+        已积累 ≥ _SUMMARY_MIN_NEW 条未覆盖片段。摘要经后台线程生成，
+        不阻塞对话循环；失败仅复位标志，下轮重试。
+        """
+        app = self.app
+        if app._summary_generating:
+            return
+        hs = app.history_size
+        hist = app.history_snapshot()
+        if len(hist) < hs + self._SUMMARY_MIN_NEW:
+            return
+        if app.turn_count - app._last_summary_turn < self._SUMMARY_MIN_GAP:
+            return
+        # deque 前端可能被裁剪，游标收敛
+        cursor = min(app._memory_cursor, len(hist))
+        if len(hist) - hs - cursor < self._SUMMARY_MIN_NEW:
+            return
+        chunk = hist[cursor:len(hist) - hs]
+        if not chunk:
+            return
+        chunk = chunk[-self._SUMMARY_CHUNK_LIMIT:]
+
+        lines = []
+        for m in chunk:
+            dname = m.get("display_name", m.get("name", "?"))
+            txt = (m.get("text") or "").strip()[:100]
+            if not txt:
+                continue
+            lines.append(f"{dname}: {txt}")
+        if not lines:
+            app._memory_cursor = max(cursor, len(hist) - hs)
+            return
+
+        print(f"[memory] 触发摘要: {len(chunk)} 条 (cursor={cursor} hist={len(hist)} hs={hs} "
+              f"现有摘要 {len(app._memory_summary)} 字)")
+
+        from services.api_service import call_chat_completion_async
+        prompt = app.ai.build_memory_summary_prompt(app._memory_summary, "\n".join(lines))
+        app._summary_generating = True
+
+        def _on_result(content):
+            content = (content or "").strip()
+            if content:
+                app._memory_summary = content[:600]
+                app._memory_cursor = max(cursor, len(hist) - hs)
+                app._last_summary_turn = app.turn_count
+                print(f"[memory] 摘要更新: {len(content)} 字 | {content[:60]}...")
+            else:
+                print("[memory] 摘要返回空内容，跳过本轮")
+            app._summary_generating = False
+
+        def _on_error(err):
+            print(f"[memory] 摘要生成失败: {err}")
+            app._summary_generating = False
+
+        call_chat_completion_async(
+            messages=[
+                {"role": "system", "content": "你是一个对话记忆整理器，只返回摘要文本。"},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.5,
+            max_tokens=400,
+            timeout=30.0,
+            on_result=_on_result,
+            on_error=_on_error,
+        )
 
     # ═══ 随机事件辅助 ═══
 
@@ -539,6 +708,7 @@ class DialogueLoop:
 
         raw_buf = []
         last_flush = 0.0
+        self.app._streaming_active = True
 
         def on_token(tok):
             nonlocal last_flush
@@ -577,6 +747,7 @@ class DialogueLoop:
                 entry["text"] = (response or "").strip()
             self.bus.emit("msg_end", dict(entry))
         finally:
+            self.app._streaming_active = False
             # farewell 清理必须执行：无论正常/异常/stop 路径，is_farewell 都要清空 _active_npc
             # 否则 NPC 状态机卡死，_should_trigger_random 持续返回 False 抑制随机事件
             if is_farewell:
@@ -670,9 +841,16 @@ class DialogueLoop:
         return self.ai._should_trigger_random()
 
     def _emit_random_result(self, result: dict):
-        """将 AI 生成的随机事件/NPC 结果发送到 UI。"""
+        """将 AI 生成的随机事件/NPC 结果发送到 UI。
+
+        对模型返回做防御性处理：JSON 数组取首个元素、非 dict 直接忽略，
+        type 已被 _generate_random_event 归一化为 "npc"/"event"。"""
+        if isinstance(result, list) and result:
+            result = result[0]
+        if not isinstance(result, dict):
+            return
         if result.get("type") == "npc":
-            npc_name = result.get("name", "路人")
+            npc_name = result.get("name") or "路人"
             npc_desc = result.get("desc", "")
             self.app._active_npc = {"name": npc_name, "desc": npc_desc}
             self.app._npc_rounds_left = 2
@@ -698,7 +876,8 @@ class DialogueLoop:
                 }
                 self._emit_npc_message(entry)
         else:
-            event_text = result.get("text", "")
+            event_text = (result.get("text") or result.get("content")
+                          or result.get("desc") or "（环境发生了些什么……）")
             self.app._char_turns_since_event = 0
             entry = {
                 "name": "__random__",
@@ -758,8 +937,8 @@ class DialogueLoop:
             return False
         if not self.app.image_gen.ready:
             return False
-        turns_since = (self.app.turn_count - self.app._last_image_turn
-                       if self.app._last_image_turn >= 0 else 999)
+        turns_since = (self.app.turn_count - self.app._last_auto_image_turn
+                       if self.app._last_auto_image_turn >= 0 else 999)
         return turns_since >= self.app.image_gen_auto_interval
 
     def _should_trigger_char_image(self) -> bool:
@@ -769,8 +948,9 @@ class DialogueLoop:
             return False
         if not self.app.image_gen.ready:
             return False
-        turns_since = (self.app.turn_count - self.app._last_image_turn
-                       if self.app._last_image_turn >= 0 else 999)
+        # 独立冷却计数：自动配图不再挤占角色请求的配额
+        turns_since = (self.app.turn_count - self.app._last_char_image_turn
+                       if self.app._last_char_image_turn >= 0 else 999)
         cooldown = max(self.app.image_gen_char_cooldown, 2)
         return turns_since >= cooldown
 
@@ -811,6 +991,10 @@ class DialogueLoop:
             self.app.turn_count += 1
             self.app.message_count += 1
             self.app._last_image_turn = self.app.turn_count
+            if source == "char":
+                self.app._last_char_image_turn = self.app.turn_count
+            else:
+                self.app._last_auto_image_turn = self.app.turn_count
             self.app._auto_image_counter = 0
             self.bus.emit("image_done", entry)
         else:

@@ -95,6 +95,7 @@ class DataManager:
         app.turn_order = list(tc.get("order", []))
         app._raw_turn_order = app.turn_order
         app.speed = max(1, min(10, sc.get("default", 3)))
+        app.history_size = max(1, min(20, tc.get("history_size", 8)))
         # 发言模式从剧本配置读取（回退到 round）
         mc = app._profile_config.get("mode", {})
         app.mode = mc.get("default", "round") if mc.get("default", "round") in ("round", "random", "dynamic") else "round"

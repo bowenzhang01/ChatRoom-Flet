@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """ChatRoom - Flet Edition · TransportBar 工具条
-  轮流 ▾ Dropdown + 速度 ━●━━ Slider + ▶/⏸/⏹ 三按钮 + 💾(暂停时显示)
-  绑定 state.loop.start / pause / resume / stop / set_speed / set_mode
+   轮流 ▾ Dropdown + 速度 ▾ Dropdown + ▶/⏸/⏹ 三按钮 + 💾(暂停时显示)
+   绑定 state.loop.start / pause / resume / stop / set_speed / set_mode
 """
 
 import flet as ft
@@ -26,7 +26,7 @@ class TransportBar:
         self.on_action = on_action  # action: "start"|"pause"|"resume"|"stop"|"save"
         self._extra_controls = extra_controls or []
         self._mode_dd: ft.Dropdown = None
-        self._speed_slider: ft.Slider = None
+        self._speed_dd: ft.Dropdown = None
         self._play_btn: ft.IconButton = None
         self._stop_btn: ft.IconButton = None
         self._save_btn: ft.IconButton = None
@@ -77,7 +77,19 @@ class TransportBar:
             visible=False,
         )
 
-        controls = [self._mode_dd] + self._extra_controls + [
+        self._speed_dd = ft.Dropdown(
+            value=str(self.state.speed),
+            options=[ft.dropdown.Option(str(i), text=f"速度 {i}") for i in range(1, 11)],
+            dense=True,
+            content_padding=ft.Padding.symmetric(horizontal=8, vertical=4),
+            width=86,
+            text_size=TEXT_SM,
+            border=ft.InputBorder.NONE,
+            trailing_icon=ft.Icon(ft.Icons.ARROW_DROP_DOWN, size=14),
+            on_select=self._on_speed_change,
+        )
+
+        controls = [self._mode_dd, self._speed_dd] + self._extra_controls + [
             self._play_btn,
             self._stop_btn,
             self._save_btn,
@@ -98,6 +110,20 @@ class TransportBar:
         v = e.control.value
         if v:
             self.state.loop.set_mode(v)
+
+    def _on_speed_change(self, e):
+        v = e.control.value
+        if not v:
+            return
+        speed = max(1, min(10, int(v)))
+        self.state.loop.set_speed(speed)
+        # 持久化为剧本默认速度
+        try:
+            pc = self.state._profile_config
+            pc.setdefault("speed", {})["default"] = speed
+            self.state.data._save_profile_config()
+        except Exception as ex:
+            print(f"[transport_bar] 保存速度失败: {ex}")
 
     def _on_play_click(self, e):
         loop = self.state.loop
@@ -145,4 +171,5 @@ class TransportBar:
 
     def refresh(self):
         self._mode_dd.value = self.state.mode if self.state.mode in ("round", "random", "dynamic") else "round"
+        self._speed_dd.value = str(self.state.speed)
         self.set_running(self.state.running, self.state.paused)

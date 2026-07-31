@@ -745,6 +745,7 @@ class ChatView(ViewBase):
             "saving": lambda d: self._on_saving(),
             "saved": self._on_saved,
             "autosave_prompt": self._on_autosave_prompt,
+            "snack": self._on_snack,
         }
         for ev, h in handlers.items():
             bus.on(ev, h)
@@ -979,6 +980,9 @@ class ChatView(ViewBase):
         if not had_dialog:
             self._snack(msg)
         self._update_status(msg, self.state.running, self.state.paused)
+
+    def _on_snack(self, msg):
+        self._snack(str(msg) if msg else "")
 
     def _on_autosave_prompt(self, data: dict):
         title = data.get("title", "未命名") if isinstance(data, dict) else "未命名"

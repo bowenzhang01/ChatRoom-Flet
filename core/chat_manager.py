@@ -354,6 +354,12 @@ class ChatManager:
             if name and name not in app._char_last_turn:
                 app._char_last_turn[name] = app.turn_count - i
         app._suggested_next = None
+        # 恢复存档 = 新的对话上下文，清空长程记忆，之后按需重新摘要
+        app._memory_summary = ""
+        app._memory_cursor = 0
+        app._last_summary_turn = 0
+        app._summary_generating = False
+        print(f"[memory] 已重置（加载存档 {chat_path.name}）")
         saved_scene = data.get("scene_idx", 0)
         if 0 <= saved_scene < len(app.scenes):
             app.scene_idx = saved_scene

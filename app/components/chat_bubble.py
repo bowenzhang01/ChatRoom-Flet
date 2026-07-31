@@ -88,26 +88,31 @@ def _render_bubble_text(text: str, max_width: float) -> ft.Column:
 
 
 def strip_streaming_tags(text: str) -> str:
-    """流式中剥离末尾不完整的 [SCENE]、[NEXT]、[IMAGE] 标签。
-    角色对话不使用 [] 方括号，遇到 [SCENE、[NEXT:、[IMAGE 即判定为标签。
-    同时隐藏末尾不完整的标签前缀，避免 token 边界闪烁。"""
+    """流式中剥离末尾不完整的 [SCENE]、[NEXT]、[IMAGE]、[SILENT] 标签。
+    角色对话不使用 [] 方括号，遇到 [SCENE、[NEXT:、[IMAGE、[SILENT 即判定为标签。
+    同时隐藏末尾不完整的标签前缀，避免 token 边界闪烁。
+    全部不区分大小写，兼容模型输出的 [image:]/[IMAGE：] 变体。"""
     # 剥离完整的 [SCENE]...[/SCENE]
-    text = re.sub(r'\s*\[SCENE\].*?\[/SCENE\]', '', text, flags=re.DOTALL)
+    text = re.sub(r'\s*\[SCENE\].*?\[/SCENE\]', '', text, flags=re.DOTALL | re.IGNORECASE)
     # 剥离完整的 [NEXT:Name]
-    text = re.sub(r'\s*\[NEXT:[^\]]+\]', '', text)
+    text = re.sub(r'\s*\[NEXT:[^\]]+\]', '', text, flags=re.IGNORECASE)
     # 剥离完整的 [IMAGE:prompt]
-    text = re.sub(r'\s*\[IMAGE:[^\]]+\]', '', text)
+    text = re.sub(r'\s*\[IMAGE\s*[:：]\s*[^\]]+\]', '', text, flags=re.IGNORECASE)
+    # 剥离完整的 [SILENT]
+    text = re.sub(r'\s*[\[【]\s*SILENT\s*[\]】]', '', text, flags=re.IGNORECASE)
     # 剥离末尾不完整的 [SCENE] 片段
-    text = re.sub(r'\s*\[SCENE\](?:(?!\[/SCENE\]).)*$', '', text, flags=re.DOTALL)
+    text = re.sub(r'\s*\[SCENE\](?:(?!\[/SCENE\]).)*$', '', text, flags=re.DOTALL | re.IGNORECASE)
     # 剥离末尾不完整的 [NEXT: 片段
-    text = re.sub(r'\s*\[NEXT:[^\]]*$', '', text)
+    text = re.sub(r'\s*\[NEXT:[^\]]*$', '', text, flags=re.IGNORECASE)
     # 剥离末尾不完整的 [IMAGE: 片段
-    text = re.sub(r'\s*\[IMAGE:[^\]]*$', '', text)
+    text = re.sub(r'\s*\[IMAGE\s*[:：][^\]]*$', '', text, flags=re.IGNORECASE)
+    # 剥离末尾不完整的 [SILENT 片段
+    text = re.sub(r'\s*[\[【]\s*SILENT[^\]]*$', '', text, flags=re.IGNORECASE)
     # 剥离末尾不完整的标签前缀（[SCE、[NEX、[IMA、[S、[N、[I）
-    m = re.search(r'\[([A-Z]*)$', text)
+    m = re.search(r'\[([A-Za-z]*)$', text)
     if m and m.group(1):
-        prefix = m.group(1)
-        if any(tag.startswith(prefix) for tag in ("SCENE", "NEXT", "IMAGE")):
+        prefix = m.group(1).lower()
+        if any(tag.lower().startswith(prefix) for tag in ("SCENE", "NEXT", "IMAGE", "SILENT")):
             text = text[:m.start()].rstrip()
     return text.strip()
 
@@ -199,6 +204,10 @@ def make_bubble_row(entry: dict, state, max_width: float, images_base_dir=None) 
     # ── 随机事件：居中分割线 ──
     if msg_type == "random_event":
         return make_random_event_row(entry, max_width)
+
+    # ── 系统提示：居中灰色小字（如跳过发言）──
+    if msg_type == "system":
+        return make_system_row(entry, max_width)
 
     # ── 路人 NPC：左对齐 amber 头像 + "路人" tag ──
     if msg_type == "random_npc":
@@ -338,6 +347,29 @@ def make_random_event_row(entry, max_width) -> ft.Control:
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
     )
     body = ft.Text(text, size=TEXT_SM, italic=True, color=ft.Colors.ON_SURFACE_VARIANT,
+                   text_align=ft.TextAlign.CENTER, width=max_width)
+    return ft.Column(
+        controls=[divider_row, ft.Container(content=body, alignment=ft.Alignment.CENTER)],
+        alignment=ft.MainAxisAlignment.CENTER,
+        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+        spacing=6,
+        tight=True,
+    )
+
+
+def make_system_row(entry, max_width) -> ft.Control:
+    """系统提示：居中分割线 + 灰色小字（如"你跳过了发言"）。"""
+    text = entry.get("text", "")
+    divider_row = ft.Row(
+        controls=[
+            ft.Divider(expand=True, height=1),
+            ft.Text("📌 系统", size=TEXT_XS, italic=True, color=ft.Colors.ON_SURFACE_VARIANT),
+            ft.Divider(expand=True, height=1),
+        ],
+        spacing=8,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+    )
+    body = ft.Text(text, size=TEXT_XS, italic=True, color=ft.Colors.ON_SURFACE_VARIANT,
                    text_align=ft.TextAlign.CENTER, width=max_width)
     return ft.Column(
         controls=[divider_row, ft.Container(content=body, alignment=ft.Alignment.CENTER)],
