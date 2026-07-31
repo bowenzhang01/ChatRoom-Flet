@@ -2,6 +2,10 @@
 
 # ChatRoom · AI Multi-Character Role-Play Chatroom
 
+> [!IMPORTANT]
+> **⚠️ Releases are outdated**: The published GitHub Releases do not reflect the latest version — **a new release is in progress**.
+> For the newest features (persistent sessions, image generation, long-term memory, etc.), run from the `main` branch source.
+
 > A multi-character AI role-playing chat app — create a story world, let AI characters talk freely. Jump in as one of them, or orchestrate everything as the "Director".
 
 ChatRoom is a complete rewrite of the original Kivy desktop app [ChatRoom](https://github.com/bowenzhang01/ChatRoom), now built on **Flet** (see [IMPLEMENTATION_GUIDE.md](./IMPLEMENTATION_GUIDE.md) for migration details):
@@ -95,6 +99,24 @@ Nine gradient color themes spanning the full spectrum from crimson to violet. Ea
 - **System messages** — Actions like "skip turn" leave a centered system note in the chat flow, keeping the narrative coherent
 - **Streaming tag stripping** — `[SCENE]` / `[NEXT]` / `[IMAGE]` / `[SILENT]` tags are fully filtered during streaming rendering, never flickering inside the bubbles
 
+### 🧠 Conversation Memory Mode (Experimental)
+
+Two ways of feeding the conversation to the LLM, switchable in ⚙️ Settings → 对话行为 → 对话记忆模式 (**restart to apply**):
+
+| | Stateless Window (default) | Persistent Sessions |
+|:---|:---|:---|
+| Memory depth | Last 8 messages + rolling `[Memory]` summary | Full transcript per character (budget ~300k tokens) |
+| Long-story coherence | Weak — early events get forgotten | Strong — characters remember the whole story |
+| Prompt cache hit | Low (prefix shifts every turn) | High (stable prefix); measured 74% vs 59% on DeepSeek |
+| Cost per turn | Constant, small | Grows with the transcript, offset by the ~1% cache-hit price |
+| Story pacing | Steady (short prompt, fast prefill) | Slower — the transcript grows; cache eviction causes periodic full re-prefill |
+| Persona adherence | Naturally stable (short context, fresh constraints) | Needs periodic persona re-injection (every 12 turns) |
+| Cold start | None | Each character's first turn after restart pays a full prefill |
+
+Under the hood (`core/session_manager.py`): one persistent transcript per AI character — a shared conversation log seen from N views (own lines as `assistant`, other characters / director / events as `user`). Every request is `[persona] + [transcript] + [turn instruction]`, so the cached prefix stays byte-stable; scene changes, director notes and random events are injected as environment messages. Config keys (under `behavior` in `config.json`): `session_mode` (`stateless` | `persistent`, default `stateless`), `session_persona_refresh` (12), `session_context_budget` (300000), `session_keep_raw` (60).
+
+> Persistent mode is cheaper on cache hits but sends a growing payload per turn, so the story advances a bit slower than stateless mode. Switch back anytime (restart to apply). Use `python temp/cache_stats.py --compare` to measure cache hit rates on your own setup.
+
 ### 🖼️ Image Generation Mode (ComfyUI)
 
 Characters can auto-generate illustrations (1024×1024, Flux-2-Klein model) alongside their lines. Auto-interval and per-character cooldown are configurable in Settings; generated images are stored with the conversation.
@@ -131,6 +153,7 @@ chatroom/
 │   ├── ai_engine.py           # AI engine (prompt building, LLM calls, tag parsing)
 │   ├── dialogue_loop.py       # Main dialogue loop (background thread + streaming pipeline)
 │   ├── chat_manager.py        # Archive management (read/write/auto-save/recovery)
+│   ├── session_manager.py     # Persistent per-role transcripts (optional memory mode)
 │   ├── data_manager.py        # Profile CRUD (characters, scenes, config)
 │   ├── events.py              # EventBus
 │   ├── debug.py               # Debug tools (enable with DEBUG=dorm)
@@ -439,6 +462,7 @@ Key milestones:
 - **9-color themes** — Single Indigo → full spectrum coverage
 - **Image generation (ComfyUI)** — Auto illustrations during dialogue via local Flux-2-Klein
 - **Long-term memory & silent characters** — `[Memory]` auto-summaries, `[SILENT]` mechanism, system messages
+- **Conversation memory mode** — optional persistent per-character sessions with stable prompt prefixes for DeepSeek cache hits
 
 ---
 

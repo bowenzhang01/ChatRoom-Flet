@@ -21,7 +21,11 @@
     "color_theme": "aurora"
   },
   "behavior": {
-    "streaming": true
+    "streaming": true,
+    "session_mode": "stateless",
+    "session_persona_refresh": 12,
+    "session_context_budget": 300000,
+    "session_keep_raw": 60
   },
   "comfyui": {
     "host": "127.0.0.1",

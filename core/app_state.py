@@ -23,6 +23,7 @@ from core.chat_manager import ChatManager
 from core.data_manager import DataManager
 from core.dialogue_loop import DialogueLoop
 from core.image_generator import ImageGenerator
+from core.session_manager import SessionManager
 
 import config
 
@@ -40,6 +41,7 @@ class AppState:
         self.data = DataManager(self)
         self.loop = DialogueLoop(self)
         self.image_gen = ImageGenerator(self)
+        self.sessions = SessionManager(self)
 
         # ── 当前剧本数据 ──
         self.profile_dir = None

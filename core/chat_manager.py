@@ -321,6 +321,7 @@ class ChatManager:
             timeout=15.0,
             on_result=_on_title_result,
             on_error=_on_title_error,
+            usage_label="title",
         )
 
     # ── 读取 ──
@@ -375,6 +376,8 @@ class ChatManager:
 
         self._last_saved_count = len(app.history)
         self._last_autosave_len = len(app.history)
+        # 持久会话模式：从历史重放重建各角色 transcript（load_chat 也经 restore_autosave 调用）
+        app.sessions.rebuild_from_history()
         return True
 
     def delete_chat(self, chat_path) -> bool:

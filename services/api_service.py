@@ -26,6 +26,35 @@ class APIError(Exception):
         self.status_code = status_code
 
 
+# ── 用量统计钩子（缓存命中率观测用，默认关闭）──
+
+_usage_callback: Optional[Callable[[dict, str, str], None]] = None
+# callback 签名: (usage: dict, model: str, label: str)
+
+
+def set_usage_callback(cb):
+    """注册用量回调。cb(usage_dict, model, label) 在每次成功响应后调用。
+    usage_dict 含 prompt_tokens / prompt_cache_hit_tokens / prompt_cache_miss_tokens /
+    completion_tokens 等字段（DeepSeek/OpenAI 兼容格式）。
+    传 None 关闭（默认，零开销）。"""
+    global _usage_callback
+    _usage_callback = cb
+
+
+def _notify_usage(usage: dict, model: str, label: Optional[str] = None):
+    if not usage or not _usage_callback:
+        return
+    try:
+        _usage_callback(usage or {}, model, label or "")
+    except Exception as e:
+        print(f"[api] usage callback 异常: {e}")
+
+
+def _extract_usage(data: dict) -> dict:
+    """从响应中提取 usage（兼容 DeepSeek/OpenAI 两种字段命名）。"""
+    return data.get("usage") or {}
+
+
 def _parse_error(e: Exception) -> str:
     """解析 HTTP/网络异常，返回人类可读消息"""
     msg = str(e)
@@ -61,6 +90,7 @@ def call_chat_completion(
     temperature: float = None,
     max_tokens: int = None,
     timeout: float = 30.0,
+    usage_label: str = None,
 ) -> str:
     """同步调用 LLM chat completion，返回响应文本。
 
@@ -115,6 +145,7 @@ def call_chat_completion(
             r.raise_for_status()
             data = r.json()
             content = data["choices"][0]["message"]["content"].strip()
+            _notify_usage(_extract_usage(data), model, usage_label)
             return content
     except httpx.HTTPStatusError as e:
         raise APIError(_parse_error(e), e.response.status_code)
@@ -132,6 +163,7 @@ def call_chat_completion_async(
     temperature: float = 0.7,
     max_tokens: int = 800,
     timeout: float = 30.0,
+    usage_label: str = None,
 ):
     """后台线程异步调用 LLM，通过回调返回结果。
 
@@ -161,6 +193,7 @@ def call_chat_completion_async(
                 temperature=temperature,
                 max_tokens=max_tokens,
                 timeout=timeout,
+                usage_label=usage_label,
             )
             if on_result:
                 on_result(result)
@@ -188,6 +221,7 @@ def call_chat_completion_stream(
     max_tokens: int = None,
     timeout: float = 60.0,
     stop_check: Callable[[], bool] = None,
+    usage_label: str = None,
 ) -> str:
     """流式调用 LLM chat completion，逐 token 回调。
 
@@ -224,10 +258,21 @@ def call_chat_completion_stream(
     timeout_log = timeout.read if isinstance(timeout, httpx.Timeout) else timeout
     print(f"[api] SSE POST {url} | model={model} | read_timeout={timeout_log}s")
     full_text = []
+    usage = {}
 
     try:
         with httpx.Client(timeout=timeout, verify=config.API_VERIFY_SSL,
                           trust_env=config.API_TRUST_ENV) as client:
+            payload = {
+                "model": model,
+                "messages": messages,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "stream": True,
+            }
+            # 仅当注册了用量回调时才请求 usage（保持默认请求体不变）
+            if _usage_callback is not None:
+                payload["stream_options"] = {"include_usage": True}
             with client.stream(
                 "POST",
                 url,
@@ -236,13 +281,7 @@ def call_chat_completion_stream(
                     "Content-Type": "application/json",
                     "Accept": "text/event-stream",
                 },
-                json={
-                    "model": model,
-                    "messages": messages,
-                    "temperature": temperature,
-                    "max_tokens": max_tokens,
-                    "stream": True,
-                },
+                json=payload,
             ) as response:
                 response.raise_for_status()
                 for line in response.iter_lines():
@@ -257,6 +296,8 @@ def call_chat_completion_stream(
                         break
                     try:
                         data = json.loads(data_str)
+                        if data.get("usage"):
+                            usage = data["usage"]
                         delta = data.get("choices", [{}])[0].get("delta", {})
                         token = delta.get("content", "")
                         if token:
@@ -269,6 +310,7 @@ def call_chat_completion_stream(
     except StreamInterrupted:
         print("[api] SSE stream interrupted by stop_check")
         result = "".join(full_text).strip()
+        _notify_usage(usage, model, usage_label)
         return result
     except httpx.HTTPStatusError as e:
         raise APIError(_parse_error(e), e.response.status_code)
@@ -276,6 +318,7 @@ def call_chat_completion_stream(
         raise APIError(_parse_error(e))
 
     result = "".join(full_text).strip()
+    _notify_usage(usage, model, usage_label)
     return result
 
 
@@ -291,6 +334,7 @@ def call_chat_completion_stream_async(
     max_tokens: int = None,
     timeout: float = 60.0,
     stop_check: Callable[[], bool] = None,
+    usage_label: str = None,
 ):
     """后台线程流式调用 LLM。每 token 回调 on_token，完成时回调 on_result。"""
     def _run():
@@ -305,6 +349,7 @@ def call_chat_completion_stream_async(
                 max_tokens=max_tokens,
                 timeout=timeout,
                 stop_check=stop_check,
+                usage_label=usage_label,
             )
             if on_result:
                 on_result(result)

@@ -45,6 +45,7 @@ class SettingsView(ViewBase):
         self._mode_dd: ft.Dropdown = None
         self._speed_dd: ft.Dropdown = None
         self._streaming_sw: ft.Switch = None
+        self._session_mode_dd: ft.Dropdown = None
         self._color_theme_dd: ft.Dropdown = None
         self._about_theme_text: ft.Text = None
         self._ssl_sw: ft.Switch = None
@@ -491,10 +492,26 @@ class SettingsView(ViewBase):
         self._streaming_sw = ft.Switch(label="流式输出", value=config.STREAMING_ENABLED)
         self._streaming_sw.on_change = self._on_streaming_change
 
+        self._session_mode_dd = ft.Dropdown(
+            value=config.SESSION_MODE if config.SESSION_MODE in ("stateless", "persistent") else "stateless",
+            options=[
+                ft.dropdown.Option("stateless", text="无状态窗口（默认）"),
+                ft.dropdown.Option("persistent", text="持久会话（记忆完整）"),
+            ],
+            dense=True, expand=True,
+            on_select=lambda e: self._on_session_mode_change(e.control.value),
+        )
+
         return self._card("对话行为（当前剧本，立即生效）", [
             self._director_sw, self._user_sw, self._dynamic_sw, self._random_sw,
             ft.Container(height=4),
             self._streaming_sw,
+            ft.Container(height=4),
+            ft.Text("对话记忆模式", size=TEXT_SM, color=ft.Colors.ON_SURFACE_VARIANT),
+            self._session_mode_dd,
+            ft.Text("无状态窗口：每轮成本恒定、人设稳定，但角色只记得最近几条。"
+                    "持久会话：每个角色保留完整对话、缓存命中率高，重启后生效。",
+                    size=TEXT_XS, color=ft.Colors.ON_SURFACE_VARIANT, italic=True),
             ft.Container(height=4),
             ft.Text("发言模式", size=TEXT_SM, color=ft.Colors.ON_SURFACE_VARIANT),
             self._mode_dd,
@@ -525,6 +542,18 @@ class SettingsView(ViewBase):
             self.state.data._save_config()
         except Exception:
             pass
+
+    def _on_session_mode_change(self, e=None):
+        value = self._session_mode_dd.value if self._session_mode_dd else None
+        if value not in ("stateless", "persistent"):
+            return
+        config.app_config.setdefault("behavior", {})["session_mode"] = value
+        try:
+            self.state.data._save_config()
+        except Exception:
+            pass
+        label = "持久会话" if value == "persistent" else "无状态窗口"
+        self._snack(f"对话记忆模式已设为「{label}」，重启应用后生效")
 
     def _show_comfyui_startup_progress(self):
         import threading
@@ -1144,6 +1173,8 @@ class SettingsView(ViewBase):
             self._speed_dd.value = str(self.state.speed)
         if self._streaming_sw:
             self._streaming_sw.value = config.STREAMING_ENABLED
+        if self._session_mode_dd:
+            self._session_mode_dd.value = config.SESSION_MODE if config.SESSION_MODE in ("stateless", "persistent") else "stateless"
         try:
             self.page.update()
         except Exception:

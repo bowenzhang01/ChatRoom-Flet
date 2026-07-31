@@ -227,6 +227,34 @@ class AIEngine:
 
     # ═══ LLM 调用 ═══
 
+    def _build_turn_instruction(self, name: str) -> str:
+        """构建持久模式下的临时指令（每轮不同，追加在 transcript 之后，不入 transcript）。
+
+        包含：用户在场提示 / [Your turn] / 模式相关输出提示（[NEXT]/[SCENE]/[IMAGE]）/ 安静提示。
+        场景文本不在其中——场景是环境状态，通过 session 的环境消息注入。
+        """
+        char = self.app.characters.get(name, {})
+        parts = []
+
+        if self.app.user_mode and "You" in self.app.characters:
+            uc = self.app.characters["You"]
+            dname = uc.get('display_name', '你')
+            desc = uc.get('description', '一个普通人')
+            pers = uc.get('personality', '')
+            pers_line = f"性格{pers}。" if pers else ""
+            parts.append(
+                f"{dname}也在场——{desc}。{pers_line}"
+                f"和其他角色一样对待，自然地与{dname}对话、互动。"
+            )
+
+        parts.append(
+            f"[Your turn - {char.get('display_name', name)}]\n"
+            f"Respond naturally. Describe what you do."
+        )
+        parts.append(self._build_output_hints(name))
+        parts.append(self._build_silent_hint(name))
+        return "\n\n".join(p for p in parts if p)
+
     def _call_llm(self, name: str):
         """调 LLM 生成角色发言。
         返回 (text, error_or_None)。成功时 error 为 None；
@@ -235,13 +263,17 @@ class AIEngine:
         char = self.app.characters.get(name)
         if not char:
             return ("...", "角色不存在")
-        prompt = self._build_prompt(name)
         try:
-            content = call_chat_completion(
-                messages=[
+            if config.SESSION_MODE == "persistent":
+                messages = self.app.sessions.build_messages(name)
+            else:
+                messages = [
                     {"role": "system", "content": char["system_prompt"]},
-                    {"role": "user", "content": prompt},
-                ],
+                    {"role": "user", "content": self._build_prompt(name)},
+                ]
+            content = call_chat_completion(
+                messages=messages,
+                usage_label=f"char:{name}",
             )
             self._api_error_count = 0
             return (content, None)
@@ -260,15 +292,19 @@ class AIEngine:
         char = self.app.characters.get(name)
         if not char:
             return ("...", "角色不存在")
-        prompt = self._build_prompt(name)
         try:
-            content = call_chat_completion_stream(
-                messages=[
+            if config.SESSION_MODE == "persistent":
+                messages = self.app.sessions.build_messages(name)
+            else:
+                messages = [
                     {"role": "system", "content": char["system_prompt"]},
-                    {"role": "user", "content": prompt},
-                ],
+                    {"role": "user", "content": self._build_prompt(name)},
+                ]
+            content = call_chat_completion_stream(
+                messages=messages,
                 on_token=on_token,
                 stop_check=self._stop_check,
+                usage_label=f"char:{name}",
             )
             self._api_error_count = 0
             return (content, None)
@@ -545,6 +581,7 @@ class AIEngine:
                 ],
                 temperature=0.9,
                 max_tokens=500,
+                usage_label="event",
             )
             result, err = extract_json(content)
             if isinstance(result, list) and result:
@@ -582,6 +619,7 @@ class AIEngine:
                     )},
                     {"role": "user", "content": prompt},
                 ],
+                usage_label="npc",
             )
             print(f"[random_npc] '{npc_name}' response: {content[:80]}...")
             return content
@@ -607,6 +645,7 @@ class AIEngine:
                 ],
                 on_token=on_token,
                 stop_check=self._stop_check,
+                usage_label="npc",
             )
             print(f"[random_npc] '{npc_name}' streaming response: {content[:80]}...")
             return content
@@ -632,6 +671,7 @@ class AIEngine:
                 ],
                 on_token=on_token,
                 stop_check=self._stop_check,
+                usage_label="npc:intro",
             )
             print(f"[random_npc] '{npc_name}' streaming intro: {content[:80]}...")
             return content
@@ -691,6 +731,7 @@ class AIEngine:
                 api_key=config.resolve_key(),
                 temperature=0.8,
                 max_tokens=500,
+                usage_label="scene",
             )
             result, err = extract_json(content)
             if result:

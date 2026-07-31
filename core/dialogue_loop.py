@@ -141,6 +141,17 @@ class DialogueLoop:
         self.app._auto_image_counter = 0
         self.ai._api_error_count = 0
 
+        # 持久会话：重置 + 从历史重建（加载存档场景）+ 注入场景
+        # 场景注入优先级：动态 current_scene > 静态 scenes[scene_idx]
+        self.app.sessions.reset()
+        if self.app.history:
+            self.app.sessions.rebuild_from_history()
+        if self.app.current_scene:
+            self.app.sessions.inject_scene(self.app.current_scene)
+        elif self.app.scenes and self.app.scene_idx >= 0:
+            self.app.sessions.inject_scene(
+                self.app.scenes[self.app.scene_idx % len(self.app.scenes)])
+
         self._stop_event.clear()
         self._paused.set()
         self._thread = threading.Thread(target=self._run, daemon=True)
@@ -224,6 +235,7 @@ class DialogueLoop:
         self.app.chat._last_saved_count = -1  # 重置：下次有消息即视为未保存
         self.app.chat._last_autosave_len = 0
         self.app.chat._clear_autosave()  # 清除过期自动存档，避免下次启动弹出恢复提示
+        self.app.sessions.reset()
         self.bus.emit("stopped", None)
         validate_runtime_state(self.app)
         self.bus.emit("set_status", "已停止")
@@ -268,6 +280,7 @@ class DialogueLoop:
         with self.app._history_lock:
             self.app.history.append(entry)
         self.bus.emit("msg", entry)
+        self.app.sessions.append_entry(entry)
 
         if image_prompt and self._should_trigger_char_image():
             self._do_image_generation(image_prompt, source="char")
@@ -294,6 +307,7 @@ class DialogueLoop:
         self.app._suggested_next = None
         self.app.message_count += 1
         self.bus.emit("msg", entry)
+        self.app.sessions.append_entry(entry)
         # 解除用户回合阻塞
         self._user_input_text = text
         self._user_input_skip = False
@@ -316,6 +330,7 @@ class DialogueLoop:
         with self.app._history_lock:
             self.app.history.append(entry)
         self.bus.emit("msg", entry)
+        self.app.sessions.append_entry(entry)
         self._user_turn_event.set()
 
     # ═══ 后台循环 ═══
@@ -330,6 +345,7 @@ class DialogueLoop:
                 self.app.current_scene = scene
                 self.app.scene_version += 1
                 self.app._last_scene_update_turn = -1
+                self.app.sessions.inject_scene(scene)
                 self.bus.emit("scene_changed", {
                     **scene, "version": self.app.scene_version,
                     "manual": True, "is_time_gen": True,
@@ -515,6 +531,7 @@ class DialogueLoop:
                         if not text and image_prompt:
                             text = "（提议为这一刻画一张插画）"
                         entry["text"] = text
+                        self.app.sessions.append_entry(entry)
                         self.bus.emit("msg_end", dict(entry))
 
                     if self.app.image_gen_enabled and image_prompt and self._should_trigger_char_image():
@@ -581,6 +598,7 @@ class DialogueLoop:
                         self.app._char_last_turn[name] = self.app.turn_count
                     self.app.message_count += 1
                     self.bus.emit("msg", entry)
+                    self.app.sessions.append_entry(entry)
 
                     if self.app.image_gen_enabled and image_prompt and self._should_trigger_char_image():
                         self._do_image_generation(image_prompt, source="char", character=name)
@@ -618,6 +636,9 @@ class DialogueLoop:
         不阻塞对话循环；失败仅复位标志，下轮重试。
         """
         app = self.app
+        if config.SESSION_MODE == "persistent":
+            # 持久模式下旧片段保存在各角色 transcript 中（预算保险丝由 SessionManager 兜底）
+            return
         if app._summary_generating:
             return
         hs = app.history_size
@@ -678,6 +699,7 @@ class DialogueLoop:
             timeout=30.0,
             on_result=_on_result,
             on_error=_on_error,
+            usage_label="summary",
         )
 
     # ═══ 随机事件辅助 ═══
@@ -729,6 +751,7 @@ class DialogueLoop:
         try:
             if self._stop_event.is_set():
                 entry["streaming"] = False
+                self.app.sessions.append_entry(entry)
                 self.bus.emit("msg_end", dict(entry))
                 # farewell 清理由 finally 统一处理
                 return response
@@ -738,6 +761,7 @@ class DialogueLoop:
 
             entry["text"] = (response or "").strip()
             entry["streaming"] = False
+            self.app.sessions.append_entry(entry)
             self.bus.emit("msg_end", dict(entry))
         except Exception as ex:
             # post_process 抛异常或其他错误：仍保证 msg_end 触发，避免气泡永久停留流式态
@@ -745,6 +769,7 @@ class DialogueLoop:
             entry["streaming"] = False
             if not entry.get("text"):
                 entry["text"] = (response or "").strip()
+            self.app.sessions.append_entry(entry)
             self.bus.emit("msg_end", dict(entry))
         finally:
             self.app._streaming_active = False
@@ -891,6 +916,7 @@ class DialogueLoop:
             self.app.turn_count += 1
             self.app.message_count += 1
             self.bus.emit("random_event_msg", entry)
+            self.app.sessions.append_entry(entry)
 
     def _emit_npc_message(self, entry: dict):
         """发送 NPC 消息并更新 history/计数。"""
@@ -899,6 +925,7 @@ class DialogueLoop:
         self.app.turn_count += 1
         self.app.message_count += 1
         self.bus.emit("random_npc_msg", entry)
+        self.app.sessions.append_entry(entry)
         if entry.get("is_farewell"):
             self.app._active_npc = None
             self.app._char_turns_since_event = 0
@@ -920,6 +947,7 @@ class DialogueLoop:
         self.app._last_scene_update_turn = self.app.turn_count
         print(f"[scene] v{self.app.scene_version - 1} -> v{self.app.scene_version}: "
               f"{self.app.current_scene.get('time', '')}|{self.app.current_scene.get('location', '')}")
+        self.app.sessions.inject_scene(self.app.current_scene)
         self.bus.emit("scene_changed", {
             "time": self.app.current_scene.get("time", ""),
             "location": self.app.current_scene.get("location", ""),
@@ -996,6 +1024,7 @@ class DialogueLoop:
             else:
                 self.app._last_auto_image_turn = self.app.turn_count
             self.app._auto_image_counter = 0
+            self.app.sessions.append_entry(entry)
             self.bus.emit("image_done", entry)
         else:
             self.bus.emit("image_error", "生成失败")
@@ -1039,6 +1068,11 @@ class DialogueLoop:
             }
             self.app.scene_version += 1
             self.app._last_scene_update_turn = self.app.turn_count
+        if self.app.current_scene:
+            self.app.sessions.inject_scene(self.app.current_scene)
+        elif self.app.scenes and 0 <= self.app.scene_idx < len(self.app.scenes):
+            # 静态场景：手动切换后按新 scene_idx 注入
+            self.app.sessions.inject_scene(self.app.scenes[self.app.scene_idx])
         self.bus.emit("scene_changed", {
             "time": (self.app.current_scene or {}).get("time", ""),
             "location": (self.app.current_scene or {}).get("location", ""),

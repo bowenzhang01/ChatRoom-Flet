@@ -2,6 +2,10 @@
 
 # ChatRoom · AI 角色扮演聊天室
 
+> [!IMPORTANT]
+> **⚠️ Release 已过时**：GitHub Releases 中发布的版本并非最新版，**最新版正在制作中**。
+> 如需体验最新功能（持久会话、图片生成、长程记忆等），请使用 `main` 分支源码运行。
+
 > 多人 AI 角色扮演聊天应用 — 创建一个故事世界，让 AI 角色们自由对话，你可以扮演其中一个，也可以充当「导演」掌控全局。
 
 ChatRoom 的前身是 Kivy 桌面应用 [ChatRoom](https://github.com/bowenzhang01/ChatRoom)，现已完全迁移至 **Flet** 框架（详见 [IMPLEMENTATION_GUIDE.md](./IMPLEMENTATION_GUIDE.md)），实现了：
@@ -95,6 +99,29 @@ ChatRoom 的前身是 Kivy 桌面应用 [ChatRoom](https://github.com/bowenzhang
 - **系统消息** — 「跳过发言」等操作会以居中系统提示的形式留在对话流中，保证叙事连贯
 - **流式标签剥离** — `[SCENE]` / `[NEXT]` / `[IMAGE]` / `[SILENT]` 标签在流式渲染时被完整过滤，不会在气泡中闪烁残留
 
+### 🧠 对话记忆模式（实验）
+
+对话如何喂给 LLM 的两种方式，在 ⚙️ 设置 → 对话行为 → 对话记忆模式 切换（**重启后生效**）：
+
+| | 无状态窗口（默认） | 持久会话 |
+|:---|:---|:---|
+| 记忆深度 | 最近 8 条 + 滚动 `[Memory]` 摘要 | 每个角色保留完整对话（预算约 30 万 token） |
+| 长剧情连贯性 | 弱，早期事件容易被遗忘 | 强，角色记得整段剧情 |
+| Prompt 缓存命中 | 低（前缀每轮滑动） | 高（前缀稳定）；DeepSeek 实测 74% vs 59% |
+| 单轮成本 | 恒定、小 | 随对话增长，靠缓存约 1% 折扣摊薄 |
+| 剧情推进节奏 | 稳定（prompt 短、prefill 快） | 略慢——transcript 变长，缓存淘汰导致周期性全量重算 |
+| 人设稳定 | 天然稳定（上下文短、约束新鲜） | 需每 12 轮人设重注防稀释 |
+| 冷启动 | 无感 | 重启后每个角色首轮全量 prefill |
+
+实现原理（`core/session_manager.py`）：每个 AI 角色一条持久 transcript——同一份共享对话日志的 N 个视图
+（自己的发言以 `assistant` 身份进入，他人发言/导演/事件为 `user`）。每轮请求 = `[人设] + [transcript] + [临时指令]`，
+缓存前缀保持字节级稳定；场景变化、导演注记、随机事件以环境消息注入。配置项（`config.json` 的 `behavior` 段）：
+`session_mode`（`stateless` | `persistent`，默认 `stateless`）、`session_persona_refresh`（12）、
+`session_context_budget`（300000）、`session_keep_raw`（60）。
+
+> 持久会话在缓存命中时更省钱，但每轮请求携带的对话越来越长，剧情推进比无状态窗口略慢；
+> 随时可在设置中切回（重启生效）。可用 `python temp/cache_stats.py --compare` 实测本机缓存命中率。
+
 ### 🖼️ 图片生成模式（ComfyUI）
 
 角色发言时可以自动生成配图（1024×1024，Flux-2-Klein 模型），设置页可调节自动间隔与角色冷却时间，生成结果自动存入对话记录。
@@ -131,6 +158,7 @@ chatroom/
 │   ├── ai_engine.py           # AI 引擎（prompt 构建/LLM 调用/标签解析）
 │   ├── dialogue_loop.py       # 对话主循环（后台线程 + 流式管线）
 │   ├── chat_manager.py        # 存档管理（读写/自动存档/恢复）
+│   ├── session_manager.py     # 持久会话（每角色 transcript，可选记忆模式）
 │   ├── data_manager.py        # 剧本 CRUD（角色/场景/配置）
 │   ├── events.py              # EventBus 事件总线
 │   ├── debug.py               # 调试工具（DEBUG=dorm 启用）
@@ -444,6 +472,7 @@ flet build web \
 - **九色主题** — 单一 Indigo → 覆盖全光谱
 - **图像生成（ComfyUI）** — 对话自动配图，本地 Flux-2-Klein 模型
 - **长程记忆 & 角色安静** — `[Memory]` 自动摘要、`[SILENT]` 安静机制、系统消息
+- **对话记忆模式** — 可选持久会话，每个角色完整记忆 + 稳定前缀命中 DeepSeek 缓存
 
 ---
 

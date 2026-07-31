@@ -90,6 +90,14 @@ RANDOM_EVENT_DEFAULTS = {
 BEHAVIOR = app_config.get("behavior", {})
 STREAMING_ENABLED = BEHAVIOR.get("streaming", True)  # 流式输出，默认开启
 
+# ═══ 对话记忆模式（import 时读取 → 重启生效）═══
+# stateless:  无状态窗口模式（默认）——每轮全新调用，最近 history_size 条 + 全局滚动摘要
+# persistent: 持久会话模式——每个 AI 角色一条持久 transcript，前缀稳定命中 DeepSeek 自动缓存
+SESSION_MODE = BEHAVIOR.get("session_mode", "stateless")
+SESSION_PERSONA_REFRESH = BEHAVIOR.get("session_persona_refresh", 12)  # 每 N 轮重注一次人设
+SESSION_CONTEXT_BUDGET = BEHAVIOR.get("session_context_budget", 300000)  # token 预算（保险丝）
+SESSION_KEEP_RAW = BEHAVIOR.get("session_keep_raw", 60)  # 超预算压缩时保留的最近消息条数
+
 # ═══ ComfyUI 配置 ═══
 _COMFYUI = app_config.get("comfyui", {})
 COMFYUI_HOST = _COMFYUI.get("host", "127.0.0.1")
